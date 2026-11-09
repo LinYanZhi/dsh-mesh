@@ -14,7 +14,7 @@
 // 归宿：reusable（dsh-mesh/plugin/dsh-mesh-ui/lib/collect.js）
 
 import { execFile } from 'node:child_process'
-import { existsSync, readdirSync, readFileSync, statfsSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync, statfsSync, writeFileSync } from 'node:fs'
 import { lookup as dnsLookup } from 'node:dns/promises'
 import { arch as osArch, cpus as osCpus, freemem as osFreemem, homedir, platform as osPlatform, release as osRelease, totalmem as osTotalmem } from 'node:os'
 import { join } from 'node:path'
@@ -439,12 +439,17 @@ export async function collect(repo) {
     list.push({ id: inst.id, port: 3080 + idx, up: Boolean(inst.up) })
   }
 
-  // 远端节点：host_self 并发（单调用超时 6s）
+  // 远端节点：host_self 并发（超时放宽到 12s —— 跨公网节点 6s 偶尔不够，会导致硬件字段丢失）
   const meshPeers = mesh.peers || []
   const peerSelfs = await Promise.all(meshPeers.map(async (peer) => {
     if (!peer.up) return null
-    return await cliJson(repo, ['peer', 'call', 'host_self', '--to', peer.name, '--args', '{}'], { timeout: 6000 })
+    return await cliJson(repo, ['peer', 'call', 'host_self', '--to', peer.name, '--args', '{}'], { timeout: 12000 })
   }))
+  // 硬件缓存：跨公网 host_self 偶发超时时，用上次成功结果兜底，避免面板时有时无
+  const HW_CACHE_FILE = join(meshHome(), 'peer-hardware.json')
+  let hwCache = {}
+  try { hwCache = JSON.parse(readFileSync(HW_CACHE_FILE, 'utf8')) || {} } catch { hwCache = {} }
+  const devKeyOf = (name) => String(name || '').toLowerCase().replace(/-(lan|wan|exec|exe|import|local|ctl)$/i, '')
   const peers = meshPeers.map((peer, index) => {
     const self = unwrapPeerCall(peerSelfs[index])
     const stats = agentStats(self?.agents)
@@ -460,7 +465,7 @@ export async function collect(repo) {
       sessions: stats.sessions,
       running: stats.running,
       hostname: self?.node?.hostname || '',
-      hardware: self?.hardware || null,
+      hardware: self?.hardware || hwCache[devKeyOf(peer.name)] || null,
       release: self?.node?.release || '',
       os: osLabel(self?.node?.platform, self?.node?.release),
       uptimeSec: overviewByNode[peer.name]?.uptimeSec ?? null,
@@ -473,6 +478,16 @@ export async function collect(repo) {
       error: peer.error?.code || null
     }
   })
+  // 同一设备可能有多个入口（company / company-exec / -lan / -wan）：硬件信息互通，
+  // 避免 UI 去重时选中了恰好没有 hardware 的那条记录。
+  const hwByDev = {}
+  for (const p of peers) { const k = devKeyOf(p.name); if (p.hardware) hwByDev[k] = p.hardware }
+  for (const p of peers) {
+    const k = devKeyOf(p.name)
+    if (!p.hardware && hwByDev[k]) p.hardware = hwByDev[k]
+    if (p.hardware) hwCache[k] = p.hardware
+  }
+  try { writeFileSync(HW_CACHE_FILE, JSON.stringify(hwCache, null, 1)) } catch { /* 缓存写失败不影响主流程 */ }
 
   // 2026-11-10：LAN 链路要显示 IP（不是主机名）→ 对域名型 tunnel.host 做一次 DNS 解析（800ms 超时，失败则回落主机名）
   function isIpLiteral(host) {
