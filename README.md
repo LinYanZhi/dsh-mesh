@@ -4,68 +4,78 @@
 
 **A multi-node AI network for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness): turn your PCs and phones into one mesh where agents can delegate work across devices and operate desktops directly.**
 
-> Status: **v0.1.0 in development** — the source is being consolidated from an internal deployment. APIs and package layout may change before the first stable release. Watch / star the repo to follow progress.
+> Status: **0.0.1 — early preview**. APIs and package layout may change. Issues/PRs welcome.
 
-## 为什么做这个 / Why
+## Why / 为什么
 
-一台机器上的 AI 再聪明，也看不到你另一台电脑的窗口、文件和应用。dsh-mesh 把每一台装了 DSH 的设备变成网络里的一个**对等节点**：
+一台机器上的 AI 看不到你另一台电脑的窗口、文件和应用。dsh-mesh 让每一台装了 DSH 的设备成为网络里的一个**对等节点**：
 
 - 每台设备既是 **host**（能被委托、被控制）也是 **controller**（可委托、可控制别人）
 - 跨设备任务用**委托协议**（任务信封 + 状态机 + 结果落盘），而不是靠人转发
-- 手机可以直接 `lock` / `show-desktop` / 关闭窗口 / 打开应用 / 操作浏览器，延迟约 0.5 秒
-- 所有节点通过自建中继（frps）在公网互通，不依赖 Cloudflare 等第三方
+- 手机可以直接锁屏 / 显示桌面 / 关闭窗口 / 打开应用 / 操作浏览器，延迟约 0.5 秒
+- 节点之间通过自建中继（frps）在公网互通，也可只在局域网使用
 
-## 架构 / Architecture
+## Packages
+
+| Package | What it does | Install |
+|---|---|---|
+| [`dsh-mesh-node`](https://www.npmjs.com/package/dsh-mesh-node) | Mesh server: exposes a machine to peers over MCP/HTTPS, with delegation + optional desktop-control tools | `npm i -g dsh-mesh-node` |
+| [`dsh-mesh-host`](https://www.npmjs.com/package/dsh-mesh-host) | DSH host-side bridge: lets the mesh server drive local sessions/tools | `dsh plugin --profile web add dsh-mesh-host` |
+| [`dsh-mesh-ui`](https://www.npmjs.com/package/dsh-mesh-ui) | Settings-page panel: AI network topology, peer health, delegation list | `dsh plugin --profile web add dsh-mesh-ui` |
+| [`dsh-mesh-autostart`](https://www.npmjs.com/package/dsh-mesh-autostart) | Keeps the mesh server alive across DSH engine restarts (useful on phone/desktop apps) | `dsh plugin --profile web add dsh-mesh-autostart` |
+
+## How it works / 架构
 
 ```
                     +------------------------------+
                     |        Relay / Control Plane |
-                    |  frps + enrollment + tokens  |
-                    |  (self-hostable, one VPS)    |
+                    |  frps tunnels (self-hosted)  |
                     +--------------+---------------+
-         TLS + per-node token      |
-   +---------------+--------+------+--------+---------------+ 
+         TLS + per-peer token     |
+   +---------------+--------+------+--------+---------------+
    |               |        |               |               |
 +--+---+       +---+--+  +--+---+       +---+--+       +----+----+
-| PC 1 |       | PC 2 |  | PC 3 |       | PC 4 |       | Phone   |
-| DSH  |<----->| DSH  |  | DSH  |<----->| DSH  |<----->| dsh-go  |
+| PC 1 |<----->| PC 2 |  | PC 3 |<----->| PC 4 |       | Phone   |
+| DSH  |       | DSH  |  | DSH  |       | DSH  |<----->| dsh-go  |
 | mesh |       | mesh |  | mesh |       | mesh |       | mesh    |
 +------+       +------+  +------+       +------+       +---------+
    每个节点 = DSH 引擎 + mesh server + host bridge + 可选桌面 helper
 ```
 
-## 功能 / Features
+- **mesh server**（`dsh-mesh-node`）：每节点一个 MCP-over-HTTPS 服务，暴露工具给 peer。
+- **host bridge**（`dsh-mesh-host`）：DSH 宿主插件，让 mesh server 能创建会话、发消息、调用本机工具。
+- **relay**：一台有公网的 VPS 跑 frps 即可让 NAT 后的节点互通（TLS + token + 指纹 pin）。
+- **桌面直控**（可选，默认关闭）：`pc_action` / `pc_app` / `pc_window` / `pc_browser`。
 
-- **对等 mesh**：节点之间两两配对，任一节点可向其他节点发委托
-- **委托协议**：`delegate / status / reply`，任务有信封、会话、状态与结果文件
-- **桌面直控**（可选，默认关闭）：`pc_action`（锁屏/显示桌面/音量/媒体键/关机等）、`pc_app`（启停应用）、`pc_window`（窗口列表/关闭/聚焦）、`pc_browser`（打开浏览器 / CDP 标签页）
-- **安全模型**：每节点独立 token + 最小 ACL、deny-by-default、审计日志、限频、可撤销
-- **自更新 / 自启**：git 拉取 + supervisor 重启；手机端插件托管（引擎重启后自动恢复）
-- **手机支持**：dsh-go（Android）作为控制器，可直控 4 台电脑；低延迟 daemon
-- **可视化面板**：设置页「AI 网络」拓扑、委托面板、设备状态
+## Security / 安全
 
-## 快速开始 / Quick start
+- 远程桌面控制默认**关闭**，需在目标节点显式开启
+- 每个 peer 独立 token + 最小 ACL；deny-by-default；审计日志；限频
+- TLS 证书指纹 pin，中继只转发流量，不持有凭据
+- 建议只在你自己的设备之间使用；详见 [SECURITY.md](SECURITY.md)
 
-> 安装器与文档正在整理，预计随 v0.1.0 发布：
-> 1. 在一台有公网的 VPS 上部署 relay（`docs/SELF-HOST-RELAY.md`）
-> 2. 每台设备安装 `dsh-mesh-node` 插件，输入邀请码入网
-> 3. 手机安装 dsh-go 后同样一键入网
+## Repository layout
 
-## 安全 / Security
+```
+packages/dsh-mesh-node/        mesh server (MCP/HTTPS, tools, delegation)
+packages/dsh-mesh-host/        DSH host bridge plugin
+packages/dsh-mesh-ui/          settings-page panel
+packages/dsh-mesh-autostart/   engine-restart supervisor plugin
+tools/                         helper scripts (PC session-0 helper, phone kit, ops)
+docs/                          architecture notes
+```
 
-远程控制默认**关闭**，必须显式开启；入网需要邀请码；所有调用进审计日志；建议只在**你自己的设备**上使用。详见 [SECURITY.md](SECURITY.md)。
+## Roadmap
 
-## 路线图 / Roadmap
+- [x] 0.0.1 — 公开源码 + 4 个 npm 包
+- [ ] 0.1.0 — 一键入网（邀请码）、Windows 安装器、完善文档
+- [ ] 0.2.0 — dsh-go 插件市场一键安装、手机端体验
+- [ ] later — 多 relay 高可用、P2P 打洞、更多平台
 
-- [ ] v0.1.0：公开源码、npm 包（`dsh-mesh-node` / `dsh-mesh-ui`）、自建 relay 指南
-- [ ] v0.2.0：一键入网（邀请码）、控制面板、Windows/macOS 安装器
-- [ ] v0.3.0：dsh-go 插件市场一键安装、手机端体验优化
-- [ ] 后续：多 relay 高可用、P2P 打洞、更多平台
+## Contributing
 
-## 贡献 / Contributing
-
-见 [CONTRIBUTING.md](CONTRIBUTING.md)。欢迎 issue / PR。
+See [CONTRIBUTING.md](CONTRIBUTING.md). 中文/English both welcome.
 
 ## License
 
-MIT — 见 [LICENSE](LICENSE)。
+MIT — see [LICENSE](LICENSE).
