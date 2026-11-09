@@ -51,6 +51,8 @@ const CONTROLLER = [
   'delegate',
   'delegate_reply',
   'delegate_gc',
+  'host_session_create',
+  'host_session_prompt',
   'pc_action',
   'pc_app',
   'pc_window',

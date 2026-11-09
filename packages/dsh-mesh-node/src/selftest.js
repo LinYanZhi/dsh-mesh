@@ -854,6 +854,7 @@ export async function runSelftest({ log = console } = {}) {
     const allow = roleAllow('controller')
     assert(allow.includes('delegate') && allow.includes('delegate_status'), 'controller must be able to delegate')
     assert(allow.includes('pc_action') && allow.includes('fs_read'), 'controller must keep pc_* + read tools')
+    assert(allow.includes('host_session_create') && allow.includes('host_session_prompt'), 'controller must allow the CLI delegation path (session create/prompt)')
     for (const dangerous of ['host_call', 'service_restart', 'mesh_config_patch', 'fs_write', 'shell_run']) {
       assert(!allow.includes(dangerous), `controller must not include ${dangerous}`)
     }
