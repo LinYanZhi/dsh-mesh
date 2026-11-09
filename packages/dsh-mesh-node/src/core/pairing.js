@@ -1,6 +1,7 @@
 import { createHash, randomInt, timingSafeEqual } from 'node:crypto'
 import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { meshHome, pairingPath, peersPath, ensureHome } from './config.js'
+import { isRole } from './roles.js'
 
 /**
  * One-time pairing codes.
@@ -60,8 +61,9 @@ function readJsonSafe(file) {
  * Create (and persist) a one-time code. Only one code is valid at a time:
  * creating a new one invalidates the previous one.
  */
-export function createPairingCode({ home = meshHome(), ttlSec = 300, note } = {}) {
+export function createPairingCode({ home = meshHome(), ttlSec = 300, note, role = 'node' } = {}) {
   ensureHome(home)
+  if (!isRole(role)) throw new Error(`unknown role: ${role}`)
   const compact = randomCode()
   const now = Date.now()
   const record = {
@@ -71,10 +73,11 @@ export function createPairingCode({ home = meshHome(), ttlSec = 300, note } = {}
     expiresAt: new Date(now + Math.max(30, ttlSec) * 1000).toISOString(),
     attempts: 0,
     used: false,
-    note: note || undefined
+    note: note || undefined,
+    role
   }
   writeJson0600(pairingPath(home), record)
-  return { code: formatCode(compact), expiresAt: record.expiresAt, ttlSec }
+  return { code: formatCode(compact), expiresAt: record.expiresAt, ttlSec, role }
 }
 
 export function readPairingState(home = meshHome()) {
@@ -86,7 +89,8 @@ export function readPairingState(home = meshHome()) {
     attempts: record.attempts || 0,
     used: record.used === true,
     expired: new Date(record.expiresAt).getTime() <= Date.now(),
-    note: record.note
+    note: record.note,
+    role: record.role || 'node'
   }
 }
 
@@ -124,7 +128,7 @@ export function claimPairingCode({ home = meshHome(), code, maxAttempts = 5 } = 
   record.used = true
   record.usedAt = new Date().toISOString()
   writeJson0600(pairingPath(home), record)
-  return { ok: true }
+  return { ok: true, role: record.role || 'node' }
 }
 
 /** Peer bookkeeping on the *client* side: who we can talk to, and with which token. */

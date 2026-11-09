@@ -1,8 +1,9 @@
 import { homedir } from 'node:os'
 import { join, resolve, sep, isAbsolute } from 'node:path'
-import { mkdirSync, readFileSync, writeFileSync, existsSync, realpathSync, statSync, renameSync } from 'node:fs'
+import { mkdirSync, readFileSync, writeFileSync, existsSync, realpathSync, statSync, renameSync, copyFileSync } from 'node:fs'
 import { randomBytes, timingSafeEqual } from 'node:crypto'
 import { readJsonFile } from './util.js'
+import { roleAllow, isRole, inferRole } from './roles.js'
 
 export const MESH_VERSION = '0.17.0'
 export const CONFIG_VERSION = 7
@@ -514,10 +515,22 @@ export function rotateToken({ home = meshHome(), id = 'default', note } = {}) {
   return { id, token }
 }
 
-/** Per-token ACL; `null` means "inherit the node-wide acl". */
+/** Per-token ACL；`null` 表示“继承节点 ACL”。
+ *  - token 带 role：允许集合由角色能力包决定（node/admin 继承节点 ACL）
+ *  - token 不带 role：沿用旧的显式 acl.allow（向后兼容）
+ */
 export function peerAclForToken(secrets, tokenId) {
   const entry = (secrets?.inbound || []).find((item) => item?.id === tokenId)
   const acl = entry?.acl
+  if (entry?.role && isRole(entry.role)) {
+    const allowed = roleAllow(entry.role)
+    return {
+      role: entry.role,
+      allow: allowed || undefined,
+      deny: Array.isArray(acl?.deny) ? acl.deny : [],
+      fsRoots: Array.isArray(acl?.fsRoots) ? acl.fsRoots : undefined
+    }
+  }
   if (!acl || typeof acl !== 'object') return null
   return {
     allow: Array.isArray(acl.allow) ? acl.allow : undefined,
@@ -528,18 +541,87 @@ export function peerAclForToken(secrets, tokenId) {
 
 /**
  * Add an inbound token (used by pairing and by `peer` bookkeeping).
- * `acl` is optional: when given the token may only call that subset of tools.
+ * `role` 是推荐方式（observer/controller/node/admin）；`acl` 保留给旧的显式写法。
+ * 带 role 时 acl.allow 被忽略（角色决定允许集合），只保留 deny / fsRoots。
  */
-export function addInboundToken({ home = meshHome(), id, note, acl, token } = {}) {
+export function addInboundToken({ home = meshHome(), id, note, acl, role, token } = {}) {
   if (!id) throw new Error('addInboundToken requires an id')
+  if (role !== undefined && role !== null && !isRole(role)) throw new Error(`unknown role: ${role}`)
   const secrets = loadSecrets(home)
   const existing = (secrets.inbound || []).find((entry) => entry.id === id)
   if (existing) throw new Error(`token id already exists: ${id}`)
   const entry = { id, token: token || newToken(), note: note || 'paired' }
-  if (acl && typeof acl === 'object') entry.acl = acl
+  if (role) entry.role = role
+  if (acl && typeof acl === 'object') {
+    if (role) {
+      const narrowed = { ...acl }
+      delete narrowed.allow
+      if (Object.keys(narrowed).length > 0) entry.acl = narrowed
+    } else {
+      entry.acl = acl
+    }
+  }
   secrets.inbound = [...(secrets.inbound || []), entry]
   saveSecrets(secrets, home)
-  return { id: entry.id, token: entry.token }
+  return { id: entry.id, token: entry.token, role: entry.role || null }
+}
+
+/** 改一个入向 token 的角色（用户/管理员决策；会移除旧的显式 allow，保留 deny/fsRoots）。 */
+export function setTokenRole({ home = meshHome(), id, role } = {}) {
+  if (!id) throw new Error('setTokenRole requires an id')
+  if (!isRole(role)) throw new Error(`unknown role: ${role}`)
+  const secrets = loadSecrets(home)
+  const entry = (secrets.inbound || []).find((item) => item?.id === id)
+  if (!entry) throw new Error(`token id not found: ${id}`)
+  const before = entry.role || null
+  entry.role = role
+  if (entry.acl && typeof entry.acl === 'object') {
+    const narrowed = { ...entry.acl }
+    delete narrowed.allow
+    if (Object.keys(narrowed).length > 0) entry.acl = narrowed
+    else delete entry.acl
+  }
+  saveSecrets(secrets, home)
+  return { id, before, role }
+}
+
+/**
+ * 旧 token 自动迁移到角色（用户无需逐工具操作）。
+ * 规则：observer/controller 子集 → 对应角色；显式 ACL 恰好等于节点 ACL → node；
+ * 其余自定义/奇怪组合保留显式 ACL 并报告（不擅自扩权）。
+ */
+export function migrateTokensToRoles({ home = meshHome(), dryRun = false } = {}) {
+  const secrets = loadSecrets(home)
+  const nodeAllow = (loadConfig(home).acl?.allow || [])
+  const changes = []
+  let mutated = false
+  for (const entry of secrets.inbound || []) {
+    if (entry.role && isRole(entry.role)) continue
+    const allow = Array.isArray(entry.acl?.allow) ? entry.acl.allow : null
+    const role = inferRole(allow, nodeAllow)
+    if (!role) {
+      changes.push({ id: entry.id, role: null, skipped: true, fromTools: allow?.length ?? null })
+      continue
+    }
+    changes.push({ id: entry.id, role, fromTools: allow?.length ?? null })
+    if (!dryRun) {
+      entry.role = role
+      if (entry.acl && typeof entry.acl === 'object') {
+        const narrowed = { ...entry.acl }
+        delete narrowed.allow
+        if (Object.keys(narrowed).length > 0) entry.acl = narrowed
+        else delete entry.acl
+      }
+      mutated = true
+    }
+  }
+  let backup = null
+  if (!dryRun && mutated) {
+    backup = `${secretsPath(home)}.bak-roles-${new Date().toISOString().replace(/[:.]/g, '-')}`
+    copyFileSync(secretsPath(home), backup)
+    saveSecrets(secrets, home)
+  }
+  return { dryRun, backup, changes }
 }
 
 /** Delete an inbound token; the holder's next request fails with 401. */

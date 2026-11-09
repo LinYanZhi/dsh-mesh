@@ -4,8 +4,9 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Client } from '@modelcontextprotocol/client'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/client'
-import { loadSecrets, defaultConfig, configPath, loadConfig, DEFAULT_ALLOW, aclDrift } from './core/config.js'
+import { loadSecrets, defaultConfig, configPath, loadConfig, DEFAULT_ALLOW, aclDrift, peerAclForToken } from './core/config.js'
 import { describeAcl, resolveAclUpdate } from './core/acl.js'
+import { roleAllow, inferRole } from './core/roles.js'
 import { applyPatchInsert, assertInside, normalizePluginFiles, patchHasPlugin, pluginRoot } from './core/repair.js'
 import { hostTokenPath, resolveHostInstance } from './core/host-agent.js'
 import { buildAll, isAllowed } from './tools/index.js'
@@ -847,6 +848,40 @@ export async function runSelftest({ log = console } = {}) {
     assert(archive, 'host_session_archive missing from the tool manifest')
     assert(archive.handler instanceof Function, 'host_session_archive has no handler')
     assert(!isAllowed(config, 'host_session_archive'), 'host_session_archive must be denied by default')
+  })
+
+  await check('roles: controller can delegate but not cross-machine writes/restarts', () => {
+    const allow = roleAllow('controller')
+    assert(allow.includes('delegate') && allow.includes('delegate_status'), 'controller must be able to delegate')
+    assert(allow.includes('pc_action') && allow.includes('fs_read'), 'controller must keep pc_* + read tools')
+    for (const dangerous of ['host_call', 'service_restart', 'mesh_config_patch', 'fs_write', 'shell_run']) {
+      assert(!allow.includes(dangerous), `controller must not include ${dangerous}`)
+    }
+  })
+
+  await check('roles: observer is read-only and cannot delegate or control', () => {
+    const allow = roleAllow('observer')
+    assert(allow.includes('fs_read') && allow.includes('cluster_status'), 'observer should read')
+    for (const notAllowed of ['delegate', 'pc_action', 'host_call', 'service_restart']) {
+      assert(!allow.includes(notAllowed), `observer must not include ${notAllowed}`)
+    }
+  })
+
+  await check('roles: inferRole maps legacy allow-lists safely', () => {
+    assert(inferRole(['mesh_self', 'fs_read']) === 'observer', 'read-only allow → observer')
+    assert(inferRole(['mesh_self', 'pc_action', 'delegate']) === 'controller', 'pc_*+delegate allow → controller')
+    assert(inferRole(DEFAULT_ALLOW, DEFAULT_ALLOW) === 'node', 'exact node ACL → node')
+    assert(inferRole(['mesh_self', 'shell_run'], DEFAULT_ALLOW) === null, 'unmappable custom ACL stays explicit')
+  })
+
+  await check('roles: peerAclForToken narrows by role and inherits for node', () => {
+    const controller = peerAclForToken({ inbound: [{ id: 'c', role: 'controller' }] }, 'c')
+    assert(controller && controller.role === 'controller', 'role should be reported')
+    assert(controller.allow.includes('delegate') && !controller.allow.includes('host_call'), 'controller allow-list applied')
+    const node = peerAclForToken({ inbound: [{ id: 'n', role: 'node' }] }, 'n')
+    assert(node && node.allow === undefined, 'node role inherits the node ACL')
+    const legacy = peerAclForToken({ inbound: [{ id: 'l', acl: { allow: ['mesh_self'] } }] }, 'l')
+    assert(legacy.allow.length === 1 && legacy.allow[0] === 'mesh_self', 'legacy explicit ACL untouched')
   })
 
   const failed = results.filter((r) => !r.ok)

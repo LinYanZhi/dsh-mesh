@@ -224,6 +224,7 @@ export async function startMeshServer({ config, secrets, log = console, port, bi
           home: meshHomeDir,
           id: baseId,
           note: `paired ${new Date().toISOString()}`,
+          role: claim.role,
           acl: body?.acl
         })
       } catch {
@@ -231,6 +232,7 @@ export async function startMeshServer({ config, secrets, log = console, port, bi
           home: meshHomeDir,
           id: `${baseId}-${Math.random().toString(36).slice(2, 6)}`,
           note: `paired ${new Date().toISOString()}`,
+          role: claim.role,
           acl: body?.acl
         })
       }
@@ -242,6 +244,7 @@ export async function startMeshServer({ config, secrets, log = console, port, bi
         ok: true,
         token: created.token,
         tokenId: created.id,
+        role: created.role || null,
         node: liveConfig.node?.name || 'local',
         version: MESH_VERSION,
         url: `${scheme}://${listenBind}:${actualPort}${mcpPath}`,

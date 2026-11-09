@@ -521,11 +521,42 @@ async function main(argv) {
 
   if (cmd === 'token') {
     const sub = argv[1] || 'list'
-    const { addInboundToken, loadSecrets } = await import('./core/config.js')
+    const { addInboundToken, loadSecrets, setTokenRole, migrateTokensToRoles } = await import('./core/config.js')
+    const { ROLE_NAMES, isRole, describeRole } = await import('./core/roles.js')
     if (sub === 'list') {
       const secrets = loadSecrets(home)
-      const rows = (secrets.inbound || []).map((entry) => ({ id: entry.id, note: entry.note || '', acl: entry.acl || null }))
+      const rows = (secrets.inbound || []).map((entry) => ({
+        id: entry.id,
+        note: entry.note || '',
+        role: entry.role || null,
+        roleHint: entry.role ? describeRole(entry.role) : (entry.acl ? '显式 ACL（legacy）' : '继承节点 ACL'),
+        acl: entry.acl || null
+      }))
       console.log(JSON.stringify(rows, null, 2))
+      return 0
+    }
+    if (sub === 'set-role') {
+      const id = argv[2]
+      const role = argValue(argv, '--role', '')
+      const yes = argv.includes('--yes')
+      if (!id || !isRole(role)) {
+        console.error(`usage: node src/cli.js token set-role <id> --role <${ROLE_NAMES.join('|')}> [--yes]`)
+        return 1
+      }
+      if (!yes) {
+        console.log(JSON.stringify({ dryRun: true, id, role, description: describeRole(role) }, null, 2))
+        console.log('加 --yes 才写入 secrets.json（热重载，无需重启）')
+        return 0
+      }
+      const r = setTokenRole({ home, id, role })
+      console.log(JSON.stringify({ ...r, description: describeRole(role) }, null, 2))
+      return 0
+    }
+    if (sub === 'migrate-roles') {
+      const yes = argv.includes('--yes')
+      const r = migrateTokensToRoles({ home, dryRun: !yes })
+      console.log(JSON.stringify(r, null, 2))
+      if (!yes) console.log('加 --yes 才真正迁移（迁移前自动备份 secrets.json）')
       return 0
     }
     if (sub === 'add') {
@@ -533,11 +564,23 @@ async function main(argv) {
       const note = argValue(argv, '--note', 'narrow token')
       const allowRaw = argValue(argv, '--allow', '')
       const fsRootsRaw = argValue(argv, '--fs-roots', '')
+      const roleRaw = argValue(argv, '--role', '')
       const yes = argv.includes('--yes')
+      if (roleRaw && !isRole(roleRaw)) {
+        console.error(`unknown role: ${roleRaw}（可选：${ROLE_NAMES.join(', ')}）`)
+        return 1
+      }
       const acl = {}
-      if (allowRaw) acl.allow = allowRaw.split(',').map((s) => s.trim()).filter(Boolean)
+      if (!roleRaw && allowRaw) acl.allow = allowRaw.split(',').map((s) => s.trim()).filter(Boolean)
+      if (roleRaw && allowRaw) console.error('⚠️ 同时给了 --role 和 --allow：以角色能力包为准，--allow 被忽略')
       if (fsRootsRaw) acl.fsRoots = fsRootsRaw.split(';').map((s) => s.trim()).filter(Boolean)
-      const plan = { id: id || '(auto: token-<random>)', note, acl: Object.keys(acl).length ? acl : '(inherit node ACL)' }
+      const plan = {
+        id: id || '(auto: token-<random>)',
+        note,
+        role: roleRaw || null,
+        roleDescription: roleRaw ? describeRole(roleRaw) : undefined,
+        acl: Object.keys(acl).length ? acl : '(inherit node ACL)'
+      }
       if (!yes) {
         console.log('（dry-run）将新增 inbound token：')
         console.log(JSON.stringify(plan, null, 2))
@@ -545,12 +588,12 @@ async function main(argv) {
         return 0
       }
       const finalId = id || `token-${Math.random().toString(16).slice(2, 10)}`
-      const created = addInboundToken({ home, id: finalId, note, acl: Object.keys(acl).length ? acl : undefined })
-      console.log(JSON.stringify({ id: created.id, token: created.token, acl: plan.acl, note }, null, 2))
+      const created = addInboundToken({ home, id: finalId, note, role: roleRaw || undefined, acl: Object.keys(acl).length ? acl : undefined })
+      console.log(JSON.stringify({ id: created.id, role: created.role, token: created.token, acl: plan.acl, note }, null, 2))
       console.log('⚠️ token 只显示这一次；只给对端配置用，禁止写进 git / 群聊 / 会分享的文档')
       return 0
     }
-    console.error('usage: node src/cli.js token list | token add [--id ID] [--allow tool1,tool2] [--fs-roots "C:\\a;C:\\b"] [--note TEXT] [--yes]')
+    console.error('usage: node src/cli.js token list | token add [--role observer|controller|node|admin] [--allow a,b] [--fs-roots "C:\\a;C:\\b"] [--note TEXT] [--yes] | token set-role <id> --role <role> [--yes] | token migrate-roles [--yes]')
     return 1
   }
 
@@ -627,15 +670,22 @@ async function main(argv) {
       : `${scheme}://${host}:${port}${config.node.path || '/mcp'}`
     if (argv.includes('--code')) {
       const { createPairingCode } = await import('./core/pairing.js')
+      const { isRole, ROLE_NAMES } = await import('./core/roles.js')
       const { describeCert } = await import('./core/tls.js')
       const rawTtl = Number(argValue(argv, '--ttl', String(config.pairing?.codeTtlSec || 1800)))
       const ttlSec = Number.isFinite(rawTtl) ? Math.min(86400, Math.max(60, Math.round(rawTtl))) : 1800
-      const created = createPairingCode({ home, ttlSec })
+      const role = argValue(argv, '--role', 'node')
+      if (!isRole(role)) {
+        console.error(`unknown role: ${role}（可选：${ROLE_NAMES.join(', ')}）`)
+        return 1
+      }
+      const created = createPairingCode({ home, ttlSec, role })
       const cert = scheme === 'https' ? describeCert(home) : null
       console.log(
         JSON.stringify(
           {
             pairingCode: created.code,
+            role: created.role,
             expiresAt: created.expiresAt,
             ttlSec,
             ttlHint: `码 ${Math.round(ttlSec / 60)} 分钟内有效、一次性；想留更久用 --ttl 86400（最长 24 h）`,
@@ -644,6 +694,7 @@ async function main(argv) {
             certFingerprint: cert?.fingerprint256 ?? null,
             nextSteps: [
               `on the peer machine: node src/cli.js peer add --url ${endpoint.replace(/\/mcp$/, '')} --code ${created.code} --name ${config.node.name}`,
+              `role: ${created.role}（对端兑换后获得这个角色；不用再逐工具授权）`,
               scheme === 'https'
                 ? `pass --fingerprint ${describeCert(home).fingerprint256} (or --ca <this node cert.pem>)`
                 : undefined
