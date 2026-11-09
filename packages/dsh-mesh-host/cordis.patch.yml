@@ -1,0 +1,4 @@
+# dsh-mesh-host: install the DSH host bridge
+- insert:
+    - id: dsh-mesh-host
+      name: dsh-mesh-host

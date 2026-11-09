@@ -1,0 +1,4 @@
+# dsh-mesh-autostart: keep the mesh server alive
+- insert:
+    - id: dsh-mesh-autostart
+      name: dsh-mesh-autostart
