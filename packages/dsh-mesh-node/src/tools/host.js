@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { hardwareInfo } from '../core/hardware.js'
 import { createHostClient, hostInstances, hostTokenPath, HostError } from '../core/host-agent.js'
 import { buildSessionProfile, classifySession, sessionBlock } from '../core/session-profile.js'
 import { fail, ok } from '../core/result.js'
@@ -91,7 +92,8 @@ export function buildHost(ctx) {
       inputSchema: z.object({ instance: instanceSchema }),
       handler: async ({ instance }) => {
         try {
-          return ok(await hostClient(ctx, instance).self())
+          const data = await hostClient(ctx, instance).self()
+          return ok({ ...data, hardware: hardwareInfo() })
         } catch (error) {
           return hostError(error)
         }

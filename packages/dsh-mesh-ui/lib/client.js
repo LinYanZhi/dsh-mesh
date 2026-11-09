@@ -1249,6 +1249,11 @@ function deviceLinkState(data, peer, lanMap) {
       var localTunnelAll = tunnelNames
       var memText = hw.memTotalGB ? ((hw.memFreeGB != null ? hw.memFreeGB : '?') + ' / ' + hw.memTotalGB + ' GB') : '—'
       var cpuText = hw.cpuModel ? hw.cpuModel + ' · ' + (hw.cpuCores || '?') + ' 线程' : '—'
+      function diskText(d) {
+        if (!d || d.totalGB == null) return '—'
+        var p = String(d.path || '').replace(/[\\/]+$/, '')
+        return (d.freeGB != null ? d.freeGB : '?') + ' / ' + d.totalGB + ' GB' + (p ? ' (' + p + ')' : '')
+      }
 
       var devices = [{
         key: 'local',
@@ -1258,6 +1263,7 @@ function deviceLinkState(data, peer, lanMap) {
           ['操作系统', hw.os || '—'],
           ['CPU', cpuText],
           ['内存', memText],
+          ['磁盘', diskText(hw.disk)],
           ['DSH 实例', localUp + '/' + instances.length + ' 在线'],
           ['会话 / 运行', sessions + ' / ' + running],
           ['模型', model],
@@ -1267,12 +1273,16 @@ function deviceLinkState(data, peer, lanMap) {
         ]
       }].concat(peers.map(function (peer) {
         var t = peer.tunnel || {}
+        var hwp = peer.hardware || {}
         return {
           key: 'peer:' + peer.name,
           name: nodeDisplay(peerDeviceKey(peer.name)),
           up: Boolean(peer.up),
           rows: [
-            ['操作系统', peer.os || '—'],
+            ['操作系统', hwp.os || peer.os || '—'],
+            ['CPU', hwp.cpuModel ? hwp.cpuModel + ' · ' + (hwp.cpuCores || '?') + ' 线程' : '—'],
+            ['内存', hwp.memTotalGB ? ((hwp.memFreeGB != null ? hwp.memFreeGB : '?') + ' / ' + hwp.memTotalGB + ' GB') : '—'],
+            ['磁盘', diskText(hwp.disk)],
             ['运行时长', uptimeText(peer.uptimeSec)],
             ['DSH 实例', (peer.instancesCount || 0) + ' 个（' + ((peer.instancesList || []).map(function (x) { return x.port + (x.up ? '✓' : '✗') }).join(' ') || '—') + '）'],
             ['会话 / 运行', (peer.sessions || 0) + ' / ' + (peer.running || 0)],

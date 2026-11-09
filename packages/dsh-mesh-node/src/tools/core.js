@@ -3,6 +3,7 @@ import { basename } from 'node:path'
 import { z } from 'zod'
 import { MESH_VERSION, configPath } from '../core/config.js'
 import { describeCert } from '../core/tls.js'
+import { hardwareInfo } from '../core/hardware.js'
 import { auditPath, auditSummary } from '../core/audit.js'
 import { ok } from '../core/result.js'
 
@@ -30,6 +31,7 @@ export function buildCore(ctx) {
             configPath: configPath(ctx.home),
             auditPath: auditPath(ctx.home)
           },
+          hardware: hardwareInfo(),
           host: {
             hostname: hostname(),
             platform: platform(),

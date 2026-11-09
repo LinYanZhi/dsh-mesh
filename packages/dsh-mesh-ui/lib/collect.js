@@ -447,6 +447,7 @@ export async function collect(repo) {
       sessions: stats.sessions,
       running: stats.running,
       hostname: self?.node?.hostname || '',
+      hardware: self?.hardware || null,
       release: self?.node?.release || '',
       os: osLabel(self?.node?.platform, self?.node?.release),
       uptimeSec: overviewByNode[peer.name]?.uptimeSec ?? null,
