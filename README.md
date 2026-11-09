@@ -74,6 +74,21 @@ docs/                          architecture notes
 - [ ] 0.2.0 — dsh-go 插件市场一键安装、手机端体验
 - [ ] later — 多 relay 高可用、P2P 打洞、更多平台
 
+## 让 AI 自己安装 / Let your agent install
+
+把下面这段直接发给你的 DSH AI：
+
+```
+请帮我安装 dsh-mesh 插件，按 https://github.com/LinYanZhi/dsh-mesh/blob/main/docs/INSTALL-FOR-AGENTS.md 执行：
+1) 确认 Node >= 22、DSH >= 0.2.0-rc.2，找到我当前使用的 DSH profile
+2) 安装并验证 dsh-mesh-host / dsh-mesh-ui / dsh-mesh-autostart
+3) 需要重启 DSH 时先问我；不要开启远程桌面控制（pcControl）
+4) 每一步报告验证结果，失败就停下来
+```
+
+- 写给 AI 的完整安装手册：[docs/INSTALL-FOR-AGENTS.md](docs/INSTALL-FOR-AGENTS.md)
+- 给人看的安装指南：[docs/INSTALL.md](docs/INSTALL.md)
+- 仓库根目录的 [AGENTS.md](AGENTS.md) 也会被大多数 coding agent 自动读取
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md). 中文/English both welcome.
