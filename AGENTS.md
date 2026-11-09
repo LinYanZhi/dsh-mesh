@@ -34,6 +34,23 @@ Windows uses the same commands (PowerShell); profile path is `$env:USERPROFILE\.
 - Never commit `~/.dsh-mesh/` (config, secrets, audit) to any repository.
 - If a step fails twice, stop and report the exact error.
 
+## Permissions & roles (never hand-edit ACLs)
+
+Tokens use **role capability packs** instead of per-tool allowlists:
+
+| Role | Capabilities | Default use |
+|---|---|---|
+| `observer` | read-only status/files/git/logs + delegation list | watch-only nodes |
+| `controller` | observer + `delegate*` + `pc_*` desktop control | phones / nodes that initiate delegation |
+| `node` | inherit the node ACL (legacy-compatible) | normal PC nodes |
+| `admin` | reserved; equals node today (real escalation still needs node ACL change) | explicit admin ops |
+
+- Roles only **narrow** the node ACL (intersection); they can never exceed it.
+- `controller` intentionally **excludes** `host_call`, `host_session_*`, `service_restart`, `mesh_config_patch`, `fs_write`, `shell_run`. Dangerous cross-machine work must be delegated to the target machine's AI (which runs locally), never auto-granted.
+- Enrollment: `dsh-mesh pair --code --role controller` → the peer redeems the code and receives that role; the peer cannot pick its own role.
+- Inspect / migrate: `dsh-mesh token list`, `dsh-mesh token migrate-roles [--yes]` (auto-infers observer/controller/node from legacy ACLs, backs up `secrets.json` first, keeps custom ACLs).
+- If a call returns `E_DENIED`, do **not** retry in a loop: either switch the token role or delegate the action to the target machine's AI.
+
 ## Verify after install
 
 ```sh
