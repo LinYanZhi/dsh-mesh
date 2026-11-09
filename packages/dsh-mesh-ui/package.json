@@ -1,6 +1,6 @@
 {
   "name": "dsh-mesh-ui",
-  "version": "0.0.3",
+  "version": "0.0.4",
   "description": "DSH settings-page panel for dsh-mesh: AI network topology, peer health, and delegation panel. Read-only; data is collected from the local mesh CLI.",
   "icon": "icon.svg",
   "type": "module",

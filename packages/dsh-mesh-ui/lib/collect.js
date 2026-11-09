@@ -14,7 +14,7 @@
 // 归宿：reusable（dsh-mesh/plugin/dsh-mesh-ui/lib/collect.js）
 
 import { execFile } from 'node:child_process'
-import { existsSync, readdirSync, readFileSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync, statfsSync } from 'node:fs'
 import { lookup as dnsLookup } from 'node:dns/promises'
 import { arch as osArch, cpus as osCpus, freemem as osFreemem, homedir, platform as osPlatform, release as osRelease, totalmem as osTotalmem } from 'node:os'
 import { join } from 'node:path'
@@ -167,7 +167,19 @@ function gb(bytes) {
   return Math.round((Number(bytes || 0) / 1024 / 1024 / 1024) * 10) / 10
 }
 
-/** 本机硬件概况（远端拿不到，需要 host_self 扩展；先只给本机）。 */
+/** 本机系统盘 / 根分区容量（与远端 hardware.disk 结构一致）。 */
+function localDisk() {
+  try {
+    const path = process.platform === 'win32' ? `${process.env.SystemDrive || 'C:'}\\` : '/'
+    const st = statfsSync(path)
+    const blockSize = Number(st.bsize || 4096)
+    return { path, totalGB: gb(Number(st.blocks) * blockSize), freeGB: gb(Number(st.bavail) * blockSize) }
+  } catch {
+    return null
+  }
+}
+
+/** 本机硬件概况（本机直采；远端由 host_self 的 hardware 字段提供）。 */
 function localHardware() {
   const cpuList = osCpus()
   const first = cpuList[0] || {}
@@ -177,7 +189,8 @@ function localHardware() {
     cpuModel: String(first.model || '').replace(/\s+/g, ' ').trim(),
     cpuCores: cpuList.length,
     memTotalGB: gb(osTotalmem()),
-    memFreeGB: gb(osFreemem())
+    memFreeGB: gb(osFreemem()),
+    disk: localDisk()
   }
 }
 
