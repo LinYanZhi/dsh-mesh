@@ -15,6 +15,7 @@
 
 import { execFile } from 'node:child_process'
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
+import { lookup as dnsLookup } from 'node:dns/promises'
 import { arch as osArch, cpus as osCpus, freemem as osFreemem, homedir, platform as osPlatform, release as osRelease, totalmem as osTotalmem } from 'node:os'
 import { join } from 'node:path'
 
@@ -210,11 +211,41 @@ function localFrpTunnels() {
     const re = /frpc\[([^\]|]+)[^\]]*\][^\n]*?使用 >>([^\s:]+):(\d+)<</g
     let match
     while ((match = re.exec(tail))) {
-      found.set(match[1].trim(), { name: match[1].trim(), host: match[2], port: match[3] })
+      found.set(match[1].trim(), { name: match[1].trim(), host: match[2], port: match[3], source: 'sakura' })
     }
     return Array.from(found.values())
   } catch {
     return []
+  }
+}
+
+/**
+ * 本机自建 frps 隧道入口（主用）：读 <repo>/.runtime/frpc/frpc.toml 的 serverAddr + remotePort。
+ * 2026-11-09：本机「公网入口」曾显示旧 Sakura 隧道（relay.example.com:29152），实际主用已是自建 frps。
+ */
+function localSelfHostedTunnel(repo) {
+  try {
+    const file = join(repo || '', '.runtime', 'frpc', 'frpc.toml')
+    const text = readText(file)
+    if (!text) return null
+    const grab = (key) => {
+      const m = new RegExp('^\\s*' + key + '\\s*=\\s*"?([^"\\r\\n]+)"?', 'm').exec(text)
+      return m ? m[1].trim() : null
+    }
+    const host = grab('serverAddr')
+    const remotePort = grab('remotePort')
+    if (!host || !remotePort) return null
+    return {
+      name: grab('name') || 'self-hosted',
+      host,
+      port: String(remotePort),
+      source: 'self-hosted-frps',
+      serverPort: grab('serverPort'),
+      localPort: grab('localPort'),
+      configPath: file
+    }
+  } catch {
+    return null
   }
 }
 
@@ -353,8 +384,11 @@ export async function collect(repo) {
   const frpPromise = frpState()
   const hardware = localHardware()
   const frpTunnels = localFrpTunnels()
+  const selfTunnel = localSelfHostedTunnel(repo)
   const localConfig = readJson(join(meshHome(), 'config.json'), {})?.node || {}
-  const meshTunnel = frpTunnels.find((item) => item.name === (localConfig.name || '')) || frpTunnels[0] || null
+  // 2026-11-09：优先自建 frps（.runtime/frpc/frpc.toml）；Sakura 隧道只作备用/历史
+  const sakuraTunnel = frpTunnels.find((item) => item.name === (localConfig.name || '')) || frpTunnels[0] || null
+  const meshTunnel = selfTunnel || sakuraTunnel
 
   const [mesh, ov, frp] = await Promise.all([meshPromise, overviewPromise, frpPromise])
   if (!mesh || mesh.__diag) return { ok: false, error: mesh?.__diag || 'mesh-health returned no JSON', generatedAt }
@@ -426,6 +460,22 @@ export async function collect(repo) {
     }
   })
 
+  // 2026-11-10：LAN 链路要显示 IP（不是主机名）→ 对域名型 tunnel.host 做一次 DNS 解析（800ms 超时，失败则回落主机名）
+  function isIpLiteral(host) {
+    return /^\\d{1,3}(\\.\\d{1,3}){3}$/.test(host) || /^\\[?[0-9a-f:]+\\]?$/i.test(host)
+  }
+  await Promise.all(peers.map(async (peer) => {
+    const tunnel = peer.tunnel || {}
+    if (!tunnel.host || isIpLiteral(tunnel.host)) return
+    try {
+      const resolved = await Promise.race([
+        dnsLookup(tunnel.host, { family: 4 }),
+        new Promise((_, reject) => setTimeout(() => reject(new Error("dns-timeout")), 800))
+      ])
+      if (resolved && resolved.address) tunnel.ip = resolved.address
+    } catch { /* 解析失败则保持主机名 */ }
+  }))
+
   return {
     ok: true,
     generatedAt,
@@ -445,6 +495,9 @@ export async function collect(repo) {
       frpRunning: Boolean(frp.running),
       frpcCount: frp.frpcCount || 0,
       tunnels: frpTunnels,
+      sakuraTunnels: frpTunnels,
+      selfHosted: selfTunnel,
+      mainSource: selfTunnel ? 'self-hosted' : (sakuraTunnel ? 'sakura' : 'none'),
       publicEntry: meshTunnel
     },
     peers,
@@ -453,6 +506,7 @@ export async function collect(repo) {
     issues: mesh.issues || [],
     hints: mesh.hints || [],
     frpFlaps: mesh.frpFlaps ?? null,
+    tunnels: mesh.tunnels || null,
     delegations: delegationSummary(),
     alerts: alertSummary()
   }

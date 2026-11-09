@@ -9,6 +9,7 @@ import { JobRunner } from './core/jobs.js'
 import { loadTlsMaterial, describeCert } from './core/tls.js'
 import { claimPairingCode, readPairingState } from './core/pairing.js'
 import { dispatch, isAllowed, applyPeerAcl, registerTools, toolNames } from './tools/index.js'
+import { createTunnelCache } from './core/tunnels.js'
 
 const NODE_STARTED_AT = new Date().toISOString()
 
@@ -89,6 +90,8 @@ export async function startMeshServer({ config, secrets, log = console, port, bi
   const audit = makeAudit({ home: meshHomeDir, log })
 
   const initial = getConfig()
+  // 2026-11-09：隧道状态缓存（自建 frps + Sakura）。/health 携带，60s 后台刷新，不阻塞请求。
+  const tunnelCache = createTunnelCache({ repo: initial.repo || process.cwd(), home: meshHomeDir, refreshMs: Math.max(3000, Number(process.env.TUNNEL_CACHE_MS || 10_000)), log }).start()
   const jobs = new JobRunner({
     home: meshHomeDir,
     audit,
@@ -164,6 +167,7 @@ export async function startMeshServer({ config, secrets, log = console, port, bi
         tools: toolNames(ctx).length,
         jobs: jobs.stats(),
         tls: tlsCfg?.enabled === true,
+        tunnels: tunnelCache.get(),
         pairing: {
           enabled: liveConfig.pairing?.enabled === true,
           codeActive: Boolean(pairingState && !pairingState.used && !pairingState.expired),

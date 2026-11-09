@@ -19,7 +19,8 @@ export const inject = ['webServer']
 
 export const name = 'dsh-mesh-ui'
 
-const REFRESH_MS = 30_000
+// 2026-11-09：默认 10s（可用 DSH_MESH_UI_REFRESH_MS 覆盖）；隧道/节点变化更快可见
+const REFRESH_MS = Math.max(3_000, Number(process.env.DSH_MESH_UI_REFRESH_MS || 5_000))
 const LATENCY_HISTORY_MAX = 30
 const REQUEST_REFRESH_COOLDOWN_MS = 8_000
 

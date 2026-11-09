@@ -33,6 +33,7 @@ function normalizePeerHealth(body) {
     pid: body.pid ?? null,
     uptimeSec: body.uptimeSec,
     tls: body.tls === true,
+    tunnels: body.tunnels || null,
     pairing: body.pairing ? { enabled: body.pairing.enabled === true, codeActive: body.pairing.codeActive === true } : null
   }
 }

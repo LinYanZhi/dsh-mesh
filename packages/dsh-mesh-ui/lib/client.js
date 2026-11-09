@@ -25,11 +25,23 @@ window.__ModuleLoader__.load({
     var useCallback = React.useCallback
 
     var API = '/api/dsh-mesh/status'
-    var REFRESH_MS = 10000
+    var REFRESH_MS = 5000
     var SUPPORTS_ZOOM = typeof CSS !== 'undefined' && typeof CSS.supports === 'function' && CSS.supports('zoom', '1.5')
 
     // 2026-11-07 用户要求：卡片标题只用固定中文叫法，不显示电脑设备名
     var NODE_LABELS = {}
+    // 2026-11-09 用户要求：名称后显示设备类型。类型依据设备快照（CPU 形态）判断，可直接改这张表：
+    var DEVICE_TYPES = {}
+    function deviceType(name) {
+      var raw = String(name || '').toLowerCase()
+      var key = peerDeviceKey(raw)
+      return DEVICE_TYPES[key] || DEVICE_TYPES[raw] || ''
+    }
+    function nodeDisplay(name) {
+      var label = nodeLabel(name)
+      var type = deviceType(name)
+      return type ? label + ' · ' + type : label
+    }
       // 同一台设备可能有多个 peer 记录（不同 token/入口：phone-node / phone-node-lan / phone-node-exec）。
   // AI 网络拓扑按「设备」展示：去掉后缀归并，取可达且延迟最优的那条。
   var PEER_SUFFIX = /-(lan|wan|exec|exe|import|local|ctl)$/i
@@ -61,6 +73,50 @@ function filterSelfPeers(list, nodeName) {
     return (list || []).filter(function (peer) { return !selfKey || peerDeviceKey(peer.name) !== selfKey })
   }
 function nodeLabel(name) { return NODE_LABELS[String(name || '').toLowerCase()] || String(name || '未知节点') }
+    // [layout-helpers-begin] 2026-11-09 拓扑自定义布局：节点 key 顺序 + localStorage 持久化 + clamp
+    var LAYOUT_STORE_KEY = 'dsh-mesh-ui.topology.layout.v1'
+    function topologyNodeKeys(data) {
+      var d = data || {}
+      var peers = filterSelfPeers(dedupePeers(d.peers || []), d.nodeName)
+      return ['local'].concat(peers.map(function (peer) { return 'peer:' + peer.name }))
+    }
+    // 2026-11-10：设备显示顺序（左→右 / 逆时针）——拓扑渲染与拖拽位置表必须共用同一顺序
+    var FAN_ORDER = []
+    function fanRankOfNodeKey(key, data) {
+      var dev = key === 'local' ? peerDeviceKey(data && data.nodeName) : peerDeviceKey(String(key || '').replace(/^peer:/, ''))
+      var idx = FAN_ORDER.indexOf(dev)
+      return idx < 0 ? 99 : idx
+    }
+    function orderedNodeKeys(data) {
+      var keys = topologyNodeKeys(data).slice()
+      keys.sort(function (a, b) {
+        var d = fanRankOfNodeKey(a, data) - fanRankOfNodeKey(b, data)
+        return d !== 0 ? d : String(a).localeCompare(String(b))
+      })
+      return keys
+    }
+    // 2026-11-10：用户手工调整后认可的默认布局（世界坐标，10000×6000 画布内）
+    var DEFAULT_DEVICE_POS = {}
+    var DEFAULT_INFRA_POS = {
+      aliyun: [4887.59, 2856.78],
+      sakura: [5177.39, 2858.40]
+    }
+    function devKeyOfNodeKey(key, data) {
+      return key === 'local' ? peerDeviceKey(data && data.nodeName) : peerDeviceKey(String(key || '').replace(/^peer:/, ''))
+    }
+    function loadMovedLayout() {
+      try {
+        var raw = window.localStorage.getItem(LAYOUT_STORE_KEY)
+        if (!raw) return {}
+        var obj = JSON.parse(raw)
+        return obj && typeof obj === 'object' ? obj : {}
+      } catch (_) { return {} }
+    }
+    function saveMovedLayout(obj) {
+      try { window.localStorage.setItem(LAYOUT_STORE_KEY, JSON.stringify(obj || {})) } catch (_) { /* ignore */ }
+    }
+    function clampNum(v, min, max) { return Math.max(min, Math.min(max, v)) }
+    // [layout-helpers-end]
     // [relay-helpers-begin] 2026-11-09 架构层：识别公网中转站(frps)与通信方式（纯函数，可单测）
     // 判定：同一公网 host 被 >=2 个 peer 使用 → 视为共享中转站；LAN/loopback 不算。
     var RELAY_PUBLIC_KINDS = { wan: 1, frp: 1 }
@@ -102,7 +158,7 @@ function nodeLabel(name) { return NODE_LABELS[String(name || '').toLowerCase()] 
     // [relay-helpers-end]
     var W = 560
     var H = 400
-    var MIN_SCALE = 0.35
+    var MIN_SCALE = 0.18
     var MAX_SCALE = 2.6
 
     var CSS = `
@@ -127,6 +183,14 @@ function nodeLabel(name) { return NODE_LABELS[String(name || '').toLowerCase()] 
   linear-gradient(90deg, rgba(128,128,128,.05) 1px, transparent 1px) 0 0/26px 26px;
   cursor:grab; touch-action:none; user-select:none; }
 .dm-viewport.dragging { cursor:grabbing; }
+.dm-viewport.resizing { cursor:ns-resize; }
+/* 2026-11-09：画布高度可拖拽调整 */
+.dm-resize { position:absolute; left:50%; bottom:0; transform:translateX(-50%); width:64px; height:12px; z-index:6; cursor:ns-resize; display:flex; align-items:center; justify-content:center; border-radius:6px 6px 0 0; background:rgba(128,128,128,.18); color:rgba(128,128,128,.9); font-size:12px; line-height:1; user-select:none; }
+.dm-resize:hover { background:rgba(88,166,255,.28); color:#7fb4ff; }
+/* 2026-11-09：悬浮节点高亮 + 连线上显示完整地址 */
+.dm-edge-label { paint-order: stroke; stroke: rgba(15,17,21,.9); stroke-width: 3px; font-family: ui-monospace,Consolas,monospace; pointer-events: none; }
+body.light .dm-edge-label { stroke: rgba(255,255,255,.92); }
+.dm-card-node.hovered { border-color: rgba(88,166,255,.95) !important; box-shadow: 0 0 0 2px rgba(88,166,255,.35), 0 10px 26px rgba(0,0,0,.25); z-index: 5; }
 .dm-world-outer { position:absolute; left:0; top:0; }
 .dm-world { position:absolute; left:0; top:0; transform-origin:0 0; }
 .dm-lines { position:absolute; left:0; top:0; overflow:visible; pointer-events:none; }
@@ -144,7 +208,7 @@ function nodeLabel(name) { return NODE_LABELS[String(name || '').toLowerCase()] 
   .dm-offline-row { margin-top:5px; font-size:10.5px; color:#c9362c; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .dm-n-head { display:flex; align-items:center; justify-content:space-between; gap:8px; }
 .dm-n-name { font-weight:650; font-size:13px; display:flex; align-items:center; gap:7px; min-width:0; }
-.dm-n-name span.dm-ell { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.dm-n-name span.dm-ell { overflow:visible; text-overflow:clip; white-space:nowrap; }
 .dm-dot { width:9px; height:9px; border-radius:50%; display:inline-block; background:#8b949e; flex:none; }
 .dm-dot.ok { background:#2e9e4f; box-shadow:0 0 0 3px rgba(63,185,80,.18); }
 .dm-dot.bad { background:#d14b41; box-shadow:0 0 0 3px rgba(248,81,73,.18); }
@@ -158,9 +222,27 @@ function nodeLabel(name) { return NODE_LABELS[String(name || '').toLowerCase()] 
 .dm-extra { font-size:11px; opacity:.6; font-variant-numeric:tabular-nums; }
 .dm-card-node.compact { padding:9px 11px; cursor:pointer; transition:border-color .12s, box-shadow .12s; }
 .dm-card-node.selected { border-color:rgba(88,166,255,.85) !important; box-shadow:0 0 0 2px rgba(88,166,255,.35), 0 6px 18px rgba(0,0,0,.12) !important; }
-.dm-card-domain { margin-top:6px; font-size:10px; opacity:.72; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; }
+.dm-card-domain { margin-top:6px; font-size:10px; opacity:.72; overflow:visible; text-overflow:clip; white-space:nowrap; font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; }
 .dm-card-dsh { margin-top:6px; }
-.dm-devices { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:10px; align-items:start; }
+/* 2026-11-09-v6：详情卡列数自适应（宽屏 3 列），不再固定 2 列 */
+.dm-devices { display:grid; grid-template-columns:repeat(auto-fit, minmax(300px, 1fr)); gap:10px; align-items:start; }
+/* 2026-11-09：三通道筛选浮层（画布内左上） */
+.dm-topo-wrap { display:flex; flex-direction:column; gap:6px; }
+.dm-topbar { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+.dm-topbar-info { font-size:10.5px; opacity:.55; margin-left:auto; white-space:nowrap; }
+.dm-filters { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+.dm-flt { display:flex; align-items:center; gap:5px; font-size:11.5px; opacity:.55; border:1px solid rgba(128,128,128,.3); border-radius:999px; padding:1px 7px; cursor:pointer; user-select:none; }
+.dm-flt.on { opacity:1; border-color:var(--c); }
+.dm-flt input { margin:0; accent-color:var(--c); }
+.dm-card-node.server { border-radius:12px; background:rgba(128,128,128,.06); }
+        .dm-chip.type { border-color:rgba(88,166,255,.5); color:#7fb4ff; }
+/* 2026-11-09：三通道虚线流动动画（位移量必须是 dash 周期 11px 的整数倍，否则循环会抽搐） */
+@keyframes dm-dashflow { to { stroke-dashoffset: -22; } }
+.dm-lines path.dm-edge-frp { animation: dm-dashflow 1.15s linear infinite; stroke-linecap: butt; }
+@media (prefers-reduced-motion: reduce) { .dm-lines path.dm-edge-frp { animation: none; } }
+.dm-infra-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(340px, 1fr)); gap:10px; margin-top:10px; }
+.dm-infra-card { border:1px solid rgba(128,128,128,.3); border-radius:11px; padding:9px 11px; background:rgba(128,128,128,.05); }
+.dm-infra-head { display:flex; align-items:center; gap:7px; font-weight:650; font-size:12.5px; margin-bottom:5px; }
 .dm-device { border:1px solid rgba(128,128,128,.22); border-radius:11px; padding:9px 11px; background:rgba(128,128,128,.035); min-width:0; overflow:hidden; }
 .dm-device.selected { border-color:rgba(88,166,255,.6); background:rgba(88,166,255,.07); }
 .dm-device-head { display:flex; align-items:center; gap:7px; font-weight:650; font-size:12.5px; margin-bottom:6px; }
@@ -184,10 +266,10 @@ function nodeLabel(name) { return NODE_LABELS[String(name || '').toLowerCase()] 
 /* 画布浮层控件 */
 .dm-zoom { position:absolute; right:8px; bottom:8px; display:flex; gap:5px; padding:4px; border-radius:9px;
   background:rgba(128,128,128,.12); backdrop-filter:blur(4px); z-index:5; }
-.dm-zoom button { width:22px; height:22px; border-radius:6px; border:1px solid rgba(128,128,128,.3); background:transparent; color:inherit; cursor:pointer; font-size:14px; line-height:1; }
+.dm-zoom button { width:22px; height:22px; border-radius:6px; border:1px solid rgba(128,128,128,.3); background:transparent; color:inherit; cursor:pointer; font-size:13px; line-height:1; padding:0; display:flex; align-items:center; justify-content:center; }
 .dm-zoom button:hover { background:rgba(128,128,128,.16); }
 .dm-zoom .pct { font-size:10.5px; opacity:.6; align-self:center; padding:0 2px; font-variant-numeric:tabular-nums; }
-.dm-hint { position:absolute; left:8px; bottom:8px; font-size:10.5px; opacity:.45; pointer-events:none; z-index:5; }
+.dm-hint { font-size:10.5px; opacity:.45; padding:0 2px; }
 
 /* 折叠面板 */
 .dm-details { border:1px solid rgba(128,128,128,.22); border-radius:11px; background:rgba(128,128,128,.035); }
@@ -221,6 +303,11 @@ function nodeLabel(name) { return NODE_LABELS[String(name || '').toLowerCase()] 
   .dm-details { background:rgba(255,255,255,.025); }
 }
 /* 2026-11-09 架构层：公网中转站（frps） */
+/* 2026-11-09 拓扑自定义布局：卡片可拖拽 */
+.dm-card-node.draggable { cursor:grab; touch-action:none; }
+.dm-card-node.draggable:active { cursor:grabbing; }
+.dm-card-node.dragging { z-index:20; border-color:rgba(88,166,255,.85) !important; box-shadow:0 12px 34px rgba(0,0,0,.30) !important; }
+.dm-layout-btn.active { border-color:rgba(88,166,255,.6); color:#3b82d6; }
 .dm-relay { border:1px solid rgba(128,128,128,.22); border-radius:12px; padding:10px 12px; background:rgba(128,128,128,.035); display:flex; flex-direction:column; gap:10px; }
 .dm-relay-head { display:flex; align-items:baseline; gap:10px; flex-wrap:wrap; }
 .dm-relay-title { font-size:12.5px; font-weight:650; }
@@ -314,20 +401,174 @@ function nodeLabel(name) { return NODE_LABELS[String(name || '').toLowerCase()] 
     // ---------- 画布：缩放 / 平移 ----------
     function Viewport(props) {
       var layout = props.layout
+      // 2026-11-09-v5：卡片宽度自适应 —— 子组件测量真实卡片宽高后回传，按实际尺寸重算多边形布局
+      var sizeState = useState(null)
+      var measuredSize = sizeState[0]
+      var setMeasuredSize = sizeState[1]
+      if (measuredSize && measuredSize.w > 0 && measuredSize.h > 0) {
+        layout = computeLayout(layout.count, { cardW: measuredSize.w, cardH: measuredSize.h })
+      }
+      var infraBoundsRef = useRef([])
+      // 2026-11-09：重置拓扑时同时通知 Topology 复位服务器卡片
+      var resetNonceState = useState(0)
+      var resetNonce = resetNonceState[0]
+      var bumpResetNonce = resetNonceState[1]
+      function onInfraBounds(boxes) { infraBoundsRef.current = boxes || [] }
+      function onCardSize(w, h) {
+        setMeasuredSize(function (prev) {
+          if (prev && prev.w === w && prev.h === h) return prev
+          return { w: w, h: h }
+        })
+      }
+      // 2026-11-09 自定义布局：moved[key] = [x,y]（绝对世界坐标；localStorage 持久化，重置清空）
+      // 2026-11-09-v2：用户反馈「拖不远」→ 世界画布固定放大（可拖很开），自适应按实际内容 bbox 缩放，
+      // 而不是按初始画布尺寸；卡片只能在世界边界内移动（防止拖丢），但世界足够大。
+      var WORLD_MIN_W = 10000
+      var WORLD_MIN_H = 6000
+      var WORLD_PAD = 16
+      var nodeKeys = orderedNodeKeys(props.data)
+      var layoutState = useState(loadMovedLayout)
+      var movedLayout = layoutState[0]
+      var setMovedLayout = layoutState[1]
+      var worldW = Math.max(layout.W, WORLD_MIN_W)
+      var worldH = Math.max(layout.H, WORLD_MIN_H)
+      var baseOffsetX = (worldW - layout.W) / 2
+      var baseOffsetY = (worldH - layout.H) / 2
+      var positions = layout.positions.map(function (p, idx) {
+        var m = movedLayout[nodeKeys[idx]]
+        if (m && m.length === 2) return [Number(m[0]), Number(m[1])]
+        var devKey = devKeyOfNodeKey(nodeKeys[idx], props.data)
+        var def = DEFAULT_DEVICE_POS[devKey]
+        if (def) return [def[0], def[1]]
+        return [p[0] + baseOffsetX, p[1] + baseOffsetY]
+      })
+      var effLayout = Object.assign({}, layout, { W: worldW, H: worldH, positions: positions, baseOffsetX: baseOffsetX, baseOffsetY: baseOffsetY, contentW: layout.W, contentH: layout.H })
+      function moveNode(key, pos) {
+        setMovedLayout(function (prev) {
+          var next = Object.assign({}, prev)
+          next[key] = pos
+          saveMovedLayout(next)
+          return next
+        })
+      }
+      function resetLayout() {
+        setMovedLayout({})
+        saveMovedLayout({})
+        // 2026-11-09：重置也恢复画布高度（用户反馈重置后"高度拉得很长"其实是之前拖拽的高度被保留）
+        setCustomHeight(0)
+        try { window.localStorage.removeItem('dsh-mesh-ui.viewportH.v1') } catch (_) { /* ignore */ }
+        interactedRef.current = false
+        bumpResetNonce(function (x) { return x + 1 })
+        setTimeout(fit, 120)
+      }
+      // 2026-11-09-v3：拖卡片到画布边缘时自动平移视角（不用手动挪画面就能拖很远）
+      function autoPanAt(clientX, clientY) {
+        var el = viewRef.current
+        if (!el) return
+        var rect = el.getBoundingClientRect()
+        var MARGIN = 60
+        var SPEED = 16
+        var dx = 0
+        var dy = 0
+        if (clientX < rect.left + MARGIN) dx = SPEED * Math.min(1, (rect.left + MARGIN - clientX) / MARGIN)
+        else if (clientX > rect.right - MARGIN) dx = -SPEED * Math.min(1, (clientX - (rect.right - MARGIN)) / MARGIN)
+        if (clientY < rect.top + MARGIN) dy = SPEED * Math.min(1, (rect.top + MARGIN - clientY) / MARGIN)
+        else if (clientY > rect.bottom - MARGIN) dy = -SPEED * Math.min(1, (clientY - (rect.bottom - MARGIN)) / MARGIN)
+        if (!dx && !dy) return
+        interactedRef.current = true
+        setView(function (prev) { return { scale: prev.scale, x: prev.x + dx, y: prev.y + dy } })
+      }
       var viewRef = useRef(null)
+      // 2026-11-09：画布高度可上下拖拽调整（持久化；双击恢复默认）
+      var heightState = useState(function () { try { var v = Number(window.localStorage.getItem('dsh-mesh-ui.viewportH.v1') || 0); return v > 0 ? v : 0 } catch (e) { return 0 } })
+      var customHeight = heightState[0]
+      var setCustomHeight = heightState[1]
+      // 2026-11-10：画布默认高度自动跟随内容（避免固定 34vh 导致"拓扑区域又高又空"）；手动拖过则以手动为准
+      var autoHState = useState(0)
+      var autoH = autoHState[0]
+      var setAutoH = autoHState[1]
+      var customHeightRef = useRef(0)
+      var resizeRef = useRef(null)
+      var resizingState = useState(false); var resizing = resizingState[0]; var setResizing = resizingState[1]
+      function onResizeDown(e) {
+        if (e.button !== 0) return
+        e.preventDefault()
+        e.stopPropagation()
+        var el = viewRef.current
+        if (!el) return
+        resizeRef.current = { sy: e.clientY, h: el.getBoundingClientRect().height }
+        interactedRef.current = true
+        setResizing(true)
+        try { e.currentTarget.setPointerCapture(e.pointerId) } catch (_) { /* ignore */ }
+      }
+      function onResizeMove(e) {
+        var r = resizeRef.current
+        if (!r) return
+        e.stopPropagation()
+        var h2 = Math.max(240, Math.min(1600, Math.round(r.h + (e.clientY - r.sy))))
+        setCustomHeight(h2)
+        try { window.localStorage.setItem('dsh-mesh-ui.viewportH.v1', String(h2)) } catch (_) { /* ignore */ }
+      }
+      function onResizeUp(e) {
+        if (!resizeRef.current) return
+        e.stopPropagation()
+        resizeRef.current = null
+        setResizing(false)
+        interactedRef.current = false
+        setTimeout(fit, 0)
+      }
+      function resetHeight() {
+        setCustomHeight(0)
+        try { window.localStorage.removeItem('dsh-mesh-ui.viewportH.v1') } catch (_) { /* ignore */ }
+        setTimeout(fit, 0)
+      }
       var dragRef = useRef(null)
       var interactedRef = useRef(false)
       var s0 = useState({ scale: 1, x: 0, y: 0 }); var view = s0[0]; var setView = s0[1]
       var s1 = useState(false); var dragging = s1[0]; var setDragging = s1[1]
+      // 2026-11-09：三通道筛选（局域网/公网/樱花）
+      var filterState = useState({ lan: true, public: true, sakura: true })
+      var showFilters = filterState[0]
+      var setShowFilters = filterState[1]
+      function toggleFilter(k) { setShowFilters(function (prev) { var n = Object.assign({}, prev); n[k] = !n[k]; return n }) }
+      // fit 用最新布局的 ref（拖拽中不重算视角；只有初始化 / 窗口变化 / ⟲ 重置 / ⤢ 自适应才重算）
+      var effRef = useRef(effLayout)
+      effRef.current = effLayout
 
       var fit = useCallback(function () {
         var el = viewRef.current
         if (!el) return
         var rect = el.getBoundingClientRect()
         if (!rect.width || !rect.height) return
-        var scale = Math.min(rect.width / layout.W, rect.height / layout.H) * 0.94
+        var cur = effRef.current || layout
+        var halfW = cur.cardW / 2
+        var halfH = cur.cardH / 2
+        var xs = []
+        var ys = []
+        ;(cur.positions || []).forEach(function (p) { xs.push(p[0]); ys.push(p[1]) })
+        if (!xs.length) { xs = [cur.W / 2]; ys = [cur.H / 2] }
+        var minX = Math.min.apply(null, xs) - halfW - WORLD_PAD
+        var maxX = Math.max.apply(null, xs) + halfW + WORLD_PAD
+        var minY = Math.min.apply(null, ys) - halfH - WORLD_PAD
+        var maxY = Math.max.apply(null, ys) + halfH + WORLD_PAD
+        // 2026-11-09：中转服务器卡片（阿里云/樱花）位置由 Topology 维护，按真实包围盒纳入自适应
+        ;(infraBoundsRef.current || []).forEach(function (b) {
+          if (!b) return
+          minX = Math.min(minX, b.x - b.w / 2 - WORLD_PAD)
+          maxX = Math.max(maxX, b.x + b.w / 2 + WORLD_PAD)
+          minY = Math.min(minY, b.y - b.h / 2 - WORLD_PAD)
+          maxY = Math.max(maxY, b.y + b.h / 2 + WORLD_PAD)
+        })
+        var bw = Math.max(1, maxX - minX)
+        var bh = Math.max(1, maxY - minY)
+        var scale = Math.min(rect.width / bw, rect.height / bh) * 0.94
         scale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, scale))
-        setView({ scale: scale, x: (rect.width - layout.W * scale) / 2, y: (rect.height - layout.H * scale) / 2 })
+        setView({ scale: scale, x: (rect.width - bw * scale) / 2 - minX * scale, y: (rect.height - bh * scale) / 2 - minY * scale })
+        // 画布默认高度 = 内容渲染高度 + 余量（仅当用户没手动调过高度）
+        if (!customHeightRef.current) {
+          var wantH = Math.max(150, Math.min(380, Math.round(bh * scale + 64)))
+          setAutoH(function (prev) { return Math.abs(prev - wantH) >= 10 ? wantH : prev })
+        }
       }, [layout.W, layout.H])
 
       useEffect(function () {
@@ -340,6 +581,11 @@ function nodeLabel(name) { return NODE_LABELS[String(name || '').toLowerCase()] 
         ro.observe(el)
         return function () { try { ro.disconnect() } catch (_) { /* ignore */ } }
       }, [fit])
+
+      // 2026-11-10：布局变化（节点数/卡片尺寸）后自动 fit（用户未手动缩放/平移时），避免停留在旧的缩放比例
+      useEffect(function () {
+        if (!interactedRef.current) setTimeout(fit, 40)
+      }, [layout.count, layout.cardW, layout.cardH])
 
       useEffect(function () {
         var el = viewRef.current
@@ -363,7 +609,7 @@ function nodeLabel(name) { return NODE_LABELS[String(name || '').toLowerCase()] 
 
       function onPointerDown(event) {
         if (event.button !== 0) return
-        if (event.target && event.target.closest && event.target.closest('button,a,summary')) return
+        if (event.target && event.target.closest && event.target.closest('button,a,summary,.dm-filters,.dm-zoom,.dm-resize')) return
         dragRef.current = { x: event.clientX, y: event.clientY, vx: view.x, vy: view.y }
         setDragging(true)
         event.currentTarget.setPointerCapture && event.currentTarget.setPointerCapture(event.pointerId)
@@ -390,24 +636,48 @@ function nodeLabel(name) { return NODE_LABELS[String(name || '').toLowerCase()] 
         })
       }
 
-      return h('div', { className: 'dm-viewport' + (dragging ? ' dragging' : ''), ref: viewRef,
-        onPointerDown: onPointerDown, onPointerMove: onPointerMove, onPointerUp: endDrag, onPointerCancel: endDrag, onPointerLeave: endDrag,
-        onDoubleClick: function () { interactedRef.current = false; fit() } },
-        // 2026-11-07：缩放改用 CSS zoom（重新布局、文字矢量重绘 → 放大不糊）；
-        // 平移用外层 transform（不参与光栅缓存）。不再使用 will-change，避免整块被缓存成位图后放大发虚。
-        h('div', { className: 'dm-world-outer', style: { transform: 'translate(' + view.x + 'px,' + view.y + 'px)' } },
-          h('div', { className: 'dm-world', style: Object.assign({ width: layout.W + 'px', height: layout.H + 'px' },
-            SUPPORTS_ZOOM ? { zoom: view.scale } : { transform: 'scale(' + view.scale + ')' }) },
-            h(Topology, { data: props.data, layout: layout, selectedKey: props.selectedKey, onSelect: props.onSelect })
+      customHeightRef.current = customHeight
+      customHeightRef.current = customHeight
+      // 2026-11-10：画布内的文字/勾选项全部移到画布外（上方工具栏 = 勾选 + 链路信息；下方 = 缩放/说明）
+      return h('div', { className: 'dm-topo-wrap' },
+        h('div', { className: 'dm-topbar' },
+          h('div', { className: 'dm-filters' },
+            [['lan', '局域网'], ['public', '阿里云'], ['sakura', '樱花穿透']].map(function (it) {
+              var tr = TRANSPORTS[it[0]]
+              return h('label', { key: it[0], className: 'dm-flt' + (showFilters[it[0]] ? ' on' : ''), style: { '--c': tr.color } },
+                h('input', { type: 'checkbox', checked: showFilters[it[0]], onChange: function () { toggleFilter(it[0]) } }),
+                h('span', null, it[1])
+              )
+            })
+          ),
+          h('span', { className: 'dm-topbar-info' }, effLayout.count + ' 节点 · ' + effLayout.edges.length + ' 条链路 · 拖拽卡片自定义布局')
+        ),
+        h('div', { className: 'dm-viewport' + (dragging ? ' dragging' : '') + (resizing ? ' resizing' : ''), ref: viewRef,
+          style: (customHeight || autoH) ? { height: (customHeight || autoH) + 'px' } : undefined,
+          onPointerDown: onPointerDown, onPointerMove: onPointerMove, onPointerUp: endDrag, onPointerCancel: endDrag, onPointerLeave: endDrag,
+          onDoubleClick: function () { interactedRef.current = false; fit() } },
+          // 2026-11-07：缩放改用 CSS zoom（重新布局、文字矢量重绘 → 放大不糊）；
+          // 平移用外层 transform（不参与光栅缓存）。不再使用 will-change，避免整块被缓存成位图后放大发虚。
+          h('div', { className: 'dm-world-outer', style: { transform: 'translate(' + view.x + 'px,' + view.y + 'px)' } },
+            h('div', { className: 'dm-world', style: Object.assign({ width: effLayout.W + 'px', height: effLayout.H + 'px' },
+              SUPPORTS_ZOOM ? { zoom: view.scale } : { transform: 'scale(' + view.scale + ')' }) },
+              h(Topology, { data: props.data, layout: effLayout, selectedKey: props.selectedKey, onSelect: props.onSelect, scale: view.scale, onNodeMove: moveNode, onDragEdge: autoPanAt, onCardSize: onCardSize, show: showFilters, onInfraBounds: onInfraBounds, resetNonce: resetNonce })
+            )
+          ),
+          h('div', { className: 'dm-zoom' },
+            h('button', { title: '放大', onClick: function () { zoomBy(1.22) } }, '+'),
+            h('button', { title: '缩小', onClick: function () { zoomBy(1 / 1.22) } }, '−'),
+            h('button', { title: '自适应', onClick: function () { interactedRef.current = false; fit() } }, '⤢'),
+            h('button', { className: 'dm-layout-btn', title: '重置为默认拓扑布局', onClick: resetLayout }, '↺'),
+            h('span', { className: 'pct' }, Math.round(view.scale * 100) + '%')
+          ),
+          h('div', { className: 'dm-resize', title: '上下拖拽调整画布高度（双击恢复默认）',
+            onPointerDown: onResizeDown, onPointerMove: onResizeMove, onPointerUp: onResizeUp, onPointerCancel: onResizeUp,
+            onDoubleClick: resetHeight },
+            h('span', null, '⋯')
           )
         ),
-        h('div', { className: 'dm-zoom' },
-          h('button', { title: '放大', onClick: function () { zoomBy(1.22) } }, '+'),
-          h('button', { title: '缩小', onClick: function () { zoomBy(1 / 1.22) } }, '−'),
-          h('button', { title: '自适应', onClick: function () { interactedRef.current = false; fit() } }, '⤢'),
-          h('span', { className: 'pct' }, Math.round(view.scale * 100) + '%')
-        ),
-        h('div', { className: 'dm-hint' }, '滚轮缩放 · 拖拽平移 · 双击复位')
+        h('div', { className: 'dm-hint' }, '拓扑 v17 · 内容 ' + Math.round(layout.W) + '×' + Math.round(layout.H) + 'px · 卡 ' + Math.round(layout.cardW) + '×' + Math.round(layout.cardH) + ' · 缩放 ' + Math.round(view.scale * 100) + '% · 滚轮缩放 / 拖拽平移')
       )
     }
 
@@ -415,65 +685,59 @@ function nodeLabel(name) { return NODE_LABELS[String(name || '').toLowerCase()] 
     // 用户偏好（2026-11-07 明确）：
     //   4 节点 = 菱形（上/右/下/左）；5 节点 = 顶点朝上的五边形；6 = 六边形；n 节点 = 顶点朝上的正 n 边形。
     //   相邻节点的「轴对齐包围盒」必须留出 GAP，否则菱形斜向两张卡会贴住/重叠。
-    function computeLayout(count) {
+    // 2026-11-09-v6：默认布局 = 顶部「阿里云 / 樱花」服务器一排 + 设备沿下方弧线扇形展开（用户指定）
+    function computeLayout(count, override) {
       var GAP = 30
-      var cardW = count <= 4 ? 176 : count <= 6 ? 152 : 136
-      var cardH = count <= 4 ? 104 : count <= 6 ? 96 : 88
+      var cardW = count <= 4 ? 210 : count <= 6 ? 196 : 176
+      var cardH = count <= 4 ? 112 : count <= 6 ? 104 : 96
+      if (override && override.cardW > 0) cardW = Math.ceil(override.cardW)
+      if (override && override.cardH > 0) cardH = Math.ceil(override.cardH)
       var PAD = 16
-      var W
-      var H
-      var positions
+      var topTierH = Math.round(cardH * 1.1)
+      var W, H, positions
       if (count <= 1) {
         W = cardW + PAD * 2
-        H = cardH + PAD * 2
-        positions = [[W / 2, H / 2]]
+        H = topTierH + cardH + PAD * 2
+        positions = [[W / 2, topTierH + cardH / 2 + PAD]]
       } else if (count === 2) {
         W = cardW * 2 + GAP + PAD * 2
-        H = cardH + PAD * 2
-        positions = [[PAD + cardW / 2, H / 2], [PAD + cardW + GAP + cardW / 2, H / 2]]
-      } else if (count === 4) {
-        // 菱形：rx - cardW = ry - cardH = GAP → 水平/垂直相邻间隙都正好 GAP
-        var rx4 = cardW + GAP
-        var ry4 = cardH + GAP
-        W = Math.ceil(2 * (rx4 + cardW / 2) + PAD * 2)
-        H = Math.ceil(2 * (ry4 + cardH / 2) + PAD * 2)
-        positions = []
-        for (var i4 = 0; i4 < 4; i4++) {
-          var a4 = (-90 + i4 * 90) * Math.PI / 180 // -90, 0, 90, 180 → 上 右 下 左
-          positions.push([W / 2 + rx4 * Math.cos(a4), H / 2 + ry4 * Math.sin(a4)])
-        }
+        H = topTierH + cardH + PAD * 2
+        positions = [[PAD + cardW / 2, topTierH + cardH / 2 + PAD], [PAD + cardW * 1.5 + GAP, topTierH + cardH / 2 + PAD]]
       } else {
-        // 正多边形：半径从弦长下限开始递增，直到任意两节点包围盒都分离
-        var MARGIN = 16
-        var R = (Math.max(cardW, cardH) + GAP) / (2 * Math.sin(Math.PI / count))
-        for (var step = 0; step < 500; step++) {
-          var pts = []
-          for (var p = 0; p < count; p++) {
-            var ap = (-90 + p * (360 / count)) * Math.PI / 180
-            pts.push([R * Math.cos(ap), R * Math.sin(ap)])
-          }
+        // 2026-11-09-v7：浅扁椭圆弧扇形（横向铺开、纵向贴近顶部服务器，压缩中间空白）
+        var START = 150 * Math.PI / 180
+        var END = 30 * Math.PI / 180
+        var stepA = (START - END) / (count - 1)
+        var MARGIN = 22
+        var A = (cardW + MARGIN) / (2 * Math.sin(stepA / 2))
+        for (var step = 0; step < 400; step++) {
           var ok = true
-          for (var x = 0; x < count && ok; x++) {
-            for (var y = x + 1; y < count; y++) {
-              var dx = Math.abs(pts[x][0] - pts[y][0])
-              var dy = Math.abs(pts[x][1] - pts[y][1])
-              if (dx < cardW + MARGIN && dy < cardH + MARGIN) { ok = false; break }
-            }
+          for (var i = 0; i < count - 1 && ok; i++) {
+            var a1 = START - i * stepA
+            var a2 = START - (i + 1) * stepA
+            var dx = Math.abs(A * Math.cos(a1) - A * Math.cos(a2))
+            var dy = Math.abs(0.35 * A * Math.sin(a1) - 0.35 * A * Math.sin(a2))
+            if (dx < cardW + MARGIN * 0.5 && dy < cardH + MARGIN * 0.5) ok = false
           }
           if (ok) break
-          R += 2
+          A += 4
         }
-        W = Math.ceil(2 * (R + cardW / 2) + PAD * 2)
-        H = Math.ceil(2 * (R + cardH / 2) + PAD * 2)
+        var B = A * 0.35
+        var halfW = A * Math.cos(END) + cardW / 2
+        W = Math.ceil(2 * halfW + PAD * 2)
+        var cx = W / 2
+        var cy = topTierH + PAD
+        H = Math.ceil(cy + B + cardH / 2 + PAD)
         positions = []
         for (var j = 0; j < count; j++) {
-          var aj = (-90 + j * (360 / count)) * Math.PI / 180
-          positions.push([W / 2 + R * Math.cos(aj), H / 2 + R * Math.sin(aj)])
+          var aj = START - j * stepA
+          positions.push([cx + A * Math.cos(aj), cy + B * Math.sin(aj)])
         }
       }
       var edges = []
       for (var m = 0; m < count; m++) for (var n = m + 1; n < count; n++) edges.push([m, n])
-      return { count: count, cardW: cardW, cardH: cardH, gap: GAP, W: W, H: H, positions: positions, edges: edges }
+      var topDeviceY = positions.length ? Math.min.apply(null, positions.map(function (p) { return p[1] })) : 0
+      return { count: count, cardW: cardW, cardH: cardH, gap: GAP, W: W, H: H, positions: positions, edges: edges, topDeviceY: topDeviceY }
     }
     // ---------- 架构层：公网中转站（frps）与各节点通信关系（2026-11-09） ----------
     function RelayLayer(props) {
@@ -484,7 +748,9 @@ function nodeLabel(name) { return NODE_LABELS[String(name || '').toLowerCase()] 
       var direct = peers.filter(function (p) { var t = p.tunnel || {}; return t.kind === 'lan' || t.kind === 'loopback' })
       var instances = (data.local && data.local.instances) || []
       var localUp = instances.filter(function (x) { return x.up }).length
-      if (!groups.length && !direct.length) return null
+      // 2026-11-09：樱花账号隧道（PC 端 API 采集，跨设备含手机）
+      var sakuraAccount = (data.tunnels && data.tunnels.sakuraAccount) || null
+      if (!groups.length && !direct.length && !sakuraAccount) return null
       return h('div', { className: 'dm-relay' },
         h('div', { className: 'dm-relay-head' },
           h('span', { className: 'dm-relay-title' }, '架构层 · 公网中转站'),
@@ -494,7 +760,7 @@ function nodeLabel(name) { return NODE_LABELS[String(name || '').toLowerCase()] 
           var ports = Object.keys(g.ports).sort()
           return h('div', { className: 'dm-relay-row', key: 'g' + gi },
             h('div', { className: 'dm-relay-end' },
-              h('div', { className: 'dm-relay-name' }, nodeLabel(data.nodeName) + '（本机）'),
+              h('div', { className: 'dm-relay-name' }, nodeDisplay(data.nodeName) + '（本机）'),
               h('div', { className: 'dm-relay-sub' }, 'DSH ' + localUp + '/' + instances.length + ' 在线')
             ),
             h('div', { className: 'dm-relay-link' }, h('span', { className: 'dm-relay-line' }), h('span', { className: 'dm-relay-dirlabel' }, '出站')),
@@ -511,26 +777,194 @@ function nodeLabel(name) { return NODE_LABELS[String(name || '').toLowerCase()] 
               var t = peer.tunnel || {}
               return h('div', { className: 'dm-relay-peer' + (peer.up ? '' : ' down'), key: peer.name },
                 h('span', { className: 'dm-dot ' + (peer.up ? 'ok' : 'bad') }),
-                h('span', { className: 'dm-relay-peer-name' }, nodeLabel(peerDeviceKey(peer.name))),
+                h('span', { className: 'dm-relay-peer-name' }, nodeDisplay(peerDeviceKey(peer.name))),
                 h('span', { className: 'dm-relay-peer-meta' }, (t.port ? ':' + t.port : '') + (peer.up && peer.latencyMs != null ? ' · ' + peer.latencyMs + 'ms' : ' · 离线'))
               )
             }))
           )
         }),
+        sakuraAccount && sakuraAccount.available ? h('div', { className: 'dm-relay-direct' },
+          h('span', { className: 'dm-k' }, '樱花隧道：'),
+          h('span', { className: 'dm-chip ' + (sakuraAccount.online === sakuraAccount.total ? 'run' : 'bad') }, sakuraAccount.online + '/' + sakuraAccount.total + ' 在线'),
+          (sakuraAccount.tunnels || []).map(function (t) {
+            return h('span', { className: 'dm-chip ' + (t.online ? 'run' : 'bad'), key: 'st' + t.id, title: (t.nodeName || '') + ' ' + t.addr + (t.online ? '' : '（离线）') },
+              (t.deviceKey || t.name) + ' ' + t.addr)
+          })
+        ) : null,
         direct.length ? h('div', { className: 'dm-relay-direct' },
           h('span', { className: 'dm-k' }, '直连：'),
           direct.map(function (peer) {
             var c = commLabel(peer, relayHosts)
-            return h('span', { className: 'dm-chip ' + (peer.up ? 'run' : 'bad'), key: peer.name, title: c.text }, nodeLabel(peerDeviceKey(peer.name)) + ' · ' + c.text)
+            return h('span', { className: 'dm-chip ' + (peer.up ? 'run' : 'bad'), key: peer.name, title: c.text }, nodeDisplay(peerDeviceKey(peer.name)) + ' · ' + c.text)
           })
         ) : null
       )
     }
 
-    // ---------- 拓扑：极简卡片（名称 / 穿透域名 / DSH 数）+ 点击选中 ----------
+    // ===== 2026-11-09 传输层封装：局域网 / 阿里云(公网) / 樱花穿透 三通道 =====
+var TRANSPORTS = {
+  lan:    { label: '局域网直连',   short: 'LAN', color: '#2e9e4f', dash: false },
+  public: { label: '公网服务器',   short: 'PUB', color: '#4d9bff', dash: true },
+  sakura: { label: '樱花穿透',     short: 'SAK', color: '#a371f7', dash: true }
+}
+var DOWN_COLOR = "rgba(209,75,65,.7)"
+// 各机 DSH 安装形态（实测/档案）
+var DEVICE_DSH = {}
+function dshTypesFor(devKey) { return DEVICE_DSH[peerDeviceKey(devKey)] || [] }
+function isLanPeer(peer) {
+  var t = (peer && peer.tunnel) || {}
+  var name = String((peer && peer.name) || '')
+  var host = String(t.host || '')
+  if (/-lan$/i.test(name)) return true
+  if (t.kind === 'lan' || t.kind === 'loopback') return true
+  if (/^(192\.168\.|10\.|172\.(1[6-9]|2[0-9]|3[01])\.)/.test(host)) return true
+  return false
+}
+function sakuraAccountOf(data) {
+  var acc = data && data.tunnels && data.tunnels.sakuraAccount
+  return acc && acc.available === true ? acc : null
+}
+function sakuraTunnelOf(data, devKey) {
+  var acc = sakuraAccountOf(data)
+  if (!acc) return null
+  var k = peerDeviceKey(devKey)
+  for (var i = 0; i < (acc.tunnels || []).length; i++) if (acc.tunnels[i].deviceKey === k) return acc.tunnels[i]
+  return null
+}
+// 设备状态 = 任一链路存活（全断才离线/红）
+function deviceLinkState(data, peer, lanMap) {
+  var dk = peerDeviceKey(peer.name)
+  var t = peer.tunnel || {}
+  var publicUp = Boolean(peer.up)
+  var lan = lanMap ? lanMap[dk] : (t.kind === 'lan' ? { up: Boolean(peer.up), host: t.host, port: t.port, ip: t.ip || '' } : null)
+  var lanUp = Boolean(lan && lan.up)
+  var st = sakuraTunnelOf(data, dk)
+  var sakuraUp = st ? st.online === true : null
+  var anyUp = publicUp || sakuraUp === true || lanUp
+  return { devKey: dk, publicUp: publicUp, lanUp: lanUp, lanTunnel: lan, sakuraUp: sakuraUp, sakuraTunnel: st, anyUp: anyUp }
+}
+
+    // ---------- 2026-11-09 画布下方：中转服务器情况（阿里云 / 樱花） ----------
+    function InfraPanels(props) {
+      var data = props.data || {}
+      var acc = sakuraAccountOf(data)
+      var peers = filterSelfPeers(dedupePeers(data.peers || []), data.nodeName)
+      // 2026-11-10：本机自身也有一条阿里云入口（publicEntry/selfHosted 的 7012），之前漏掉了
+      var lt = data.localTunnel || {}
+      var selfHost = lt.selfHosted || {}
+      var entry = lt.publicEntry || selfHost || {}
+      var localPort = entry.port || selfHost.port || null
+      var localHost = entry.host || selfHost.host || "relay.example.com"
+      var localKey = peerDeviceKey(data.nodeName)
+      var devs = [{ devKey: localKey, name: nodeDisplay(data.nodeName) + "（本机）", up: true, port: localPort, host: localHost }].concat(peers.filter(function (p) { return !isLanPeer(p) }).map(function (p) {
+        var tu = p.tunnel || {}
+        return { devKey: peerDeviceKey(p.name), name: nodeDisplay(peerDeviceKey(p.name)), up: Boolean(p.up), port: tu.port || null, host: tu.host || 'relay.example.com' }
+      }))
+      var aliyunRows = devs.filter(function (d) { return d.port }).map(function (d) {
+        return h('div', { key: d.devKey, className: 'dm-device-row' },
+          h('span', { className: 'dm-device-k' }, d.name),
+          h('span', { className: 'dm-device-v' }, (d.up ? '✅ ' : '❌ ') + (d.host || 'relay.example.com') + ':' + d.port)
+        )
+      })
+      var tunnelRows = acc ? (acc.tunnels || []).map(function (x, i) {
+        return h('div', { key: 'st' + i, className: 'dm-device-row' },
+          h('span', { className: 'dm-device-k' }, (x.deviceKey ? nodeDisplay(peerDeviceKey(x.deviceKey)) : (x.name || '未归类'))),
+          h('span', { className: 'dm-device-v' }, (x.online ? '✅ ' : '❌ ') + (x.addr || ''))
+        )
+      }) : null
+      if (!aliyunRows.length && !tunnelRows) return null
+      return h('div', { className: 'dm-infra-grid' },
+        h('div', { className: 'dm-infra-card' },
+          h('div', { className: 'dm-infra-head' },
+            h('span', { className: 'dm-dot ok', style: { background: TRANSPORTS.public.color } }),
+            h('span', null, '阿里云服务器 · ECS'),
+            h('span', { className: 'dm-sub', style: { marginLeft: 'auto' } }, '自建 frps')
+          ),
+          h('div', { className: 'dm-sub dm-mono', style: { marginBottom: 4 } }, 'relay.example.com · 隧道 ' + (devs.filter(function (d) { return d.port }).map(function (d) { return d.port }).sort().join(' / ') || '—')),
+          aliyunRows
+        ),
+        acc ? h('div', { className: 'dm-infra-card' },
+          h('div', { className: 'dm-infra-head' },
+            h('span', { className: 'dm-dot', style: { background: TRANSPORTS.sakura.color } }),
+            h('span', null, '樱花穿透服务器'),
+            h('span', { className: 'dm-sub', style: { marginLeft: 'auto' } }, acc.online + '/' + acc.total + ' 在线')
+          ),
+          h('div', { className: 'dm-sub dm-mono', style: { marginBottom: 4 } }, 'relay.example.com / relay.example.com / relay.example.com'),
+          tunnelRows
+        ) : null
+      )
+    }
+
+// ---------- 拓扑：极简卡片（名称 / 穿透域名 / DSH 数）+ 点击选中 ----------
     function Topology(props) {
       var data = props.data
       var layout = props.layout
+      // 2026-11-09-v5：卡片宽度自适应 —— 每次渲染后测量真实尺寸，回传父组件重算布局；
+      // 同时把每张卡的实际尺寸给连线用（不同卡片宽窄不同，连线端点贴各自边缘）。
+      var cardRefs = useRef({})
+      var cardSizeState = useState({})
+      var cardSizes = cardSizeState[0]
+      var setCardSizes = cardSizeState[1]
+      useEffect(function () {
+        var next = {}
+        var maxW = 0
+        var maxH = 0
+        var changed = false
+        Object.keys(cardRefs.current).forEach(function (key) {
+          var el = cardRefs.current[key]
+          if (!el) return
+          var w = el.offsetWidth
+          var h = el.offsetHeight
+          if (!w || !h) return
+          next[key] = { w: w, h: h }
+          if (w > maxW) maxW = w
+          if (h > maxH) maxH = h
+          var old = cardSizes[key]
+          if (!old || Math.abs(old.w - w) > 1 || Math.abs(old.h - h) > 1) changed = true
+        })
+        if (!maxW) return
+        if (changed) setCardSizes(next)
+        if (props.onCardSize) props.onCardSize(maxW, maxH)
+      })
+      // 2026-11-09 卡片拖拽：在世界坐标里移动；连线由 layout.positions 派生，移动即自动跟随。
+      var dragState = useState(null)
+      var dragKey = dragState[0]
+      var setDragKey = dragState[1]
+      var dragRef = useRef(null)
+      function cardPointerDown(node, pos, event) {
+        if (event.button !== 0) return
+        event.stopPropagation()
+        dragRef.current = { key: node.key, sx: event.clientX, sy: event.clientY, ox: pos[0], oy: pos[1], moved: false }
+        setDragKey(node.key)
+        try { event.currentTarget.setPointerCapture(event.pointerId) } catch (_) { /* ignore */ }
+      }
+      function cardPointerMove(node, event) {
+        var drag = dragRef.current
+        if (!drag || drag.key !== node.key) return
+        event.stopPropagation()
+        var scale = props.scale || 1
+        var dx = (event.clientX - drag.sx) / scale
+        var dy = (event.clientY - drag.sy) / scale
+        if (!drag.moved && (Math.abs(dx) + Math.abs(dy)) > 3) drag.moved = true
+        if (!drag.moved) return
+        if (String(node.key).indexOf('server-') === 0) { infraMove(node.key, [drag.ox + dx, drag.oy + dy]); return }
+        // 2026-11-09-v3：不再限制在画布边界内（用户反馈左侧有「空气墙」）；
+        // 坐标允许任意值，.dm-world/.dm-lines 均 overflow:visible，配合拖到边缘自动平移可无限拖。
+        var nx = drag.ox + dx
+        var ny = drag.oy + dy
+        if (props.onNodeMove) props.onNodeMove(node.key, [nx, ny])
+        if (props.onDragEdge) props.onDragEdge(event.clientX, event.clientY)
+      }
+      function cardPointerUp(node, event) {
+        var drag = dragRef.current
+        if (!drag || drag.key !== node.key) return
+        event.stopPropagation()
+        var wasDrag = drag.moved
+        dragRef.current = null
+        setDragKey(null)
+        if (!wasDrag && props.onSelect) props.onSelect(node.key)
+      }
+      function cardPointerCancel() { dragRef.current = null; setDragKey(null) }
       var peers = filterSelfPeers(dedupePeers(data.peers || []), data.nodeName)
       var relayHosts = relayHostSet(peers)
       var endpoint = data.endpoint || {}
@@ -544,7 +978,11 @@ function nodeLabel(name) { return NODE_LABELS[String(name || '').toLowerCase()] 
 
       function localDomain() {
         var entry = localTunnel.publicEntry
-        if (entry && entry.host) return entry.host + ':' + entry.port
+        var src = localTunnel.mainSource || (entry && entry.source === 'self-hosted-frps' ? 'self-hosted' : '')
+        if (entry && entry.host) {
+          var tag = src === 'self-hosted' ? '（自建 frps）' : (src === 'sakura' ? '（Sakura 备用）' : '')
+          return entry.host + ':' + entry.port + tag
+        }
         if (localTunnel.frpRunning) return 'SakuraFrp 已开 · ' + (localTunnel.bind || '?') + ':' + localTunnel.port
         if (localTunnel.port) return '未开穿透 · ' + (localTunnel.bind || '?') + ':' + localTunnel.port
         return '未配置'
@@ -555,104 +993,233 @@ function nodeLabel(name) { return NODE_LABELS[String(name || '').toLowerCase()] 
         return t.host + (t.port ? ':' + t.port : '') + (t.kind === 'lan' ? '（内网）' : '')
       }
 
-      var nodes = [{
-        key: 'local',
-        local: true,
-        up: Boolean(endpoint.up),
-        name: nodeLabel(data.nodeName) + '（本机）',
-        domain: localDomain(),
-        dsh: localUp + '/' + instances.length,
-        ports: instances.map(function (inst) { return { port: inst.port, up: inst.up } }),
-        extra: ''
-      }].concat(peers.map(function (peer) {
-        var t = peer.tunnel || {}
-        var tunnelText = peer.tunnelText || ''
-        return {
-          key: 'peer:' + peer.name,
-          local: false,
-          up: Boolean(peer.up),
-          name: nodeLabel(peerDeviceKey(peer.name)),
-          domain: peerDomain(peer),
-          comm: commLabel(peer, relayHosts).short,
-          dsh: String(peer.instancesCount || 0),
-          ports: peer.instancesList || [],
-          extra: peer.up ? (peer.latencyMs == null ? '' : peer.latencyMs + 'ms') : '离线',
-          error: peer.error || '',           detectedAt: peer.detectedAt || ''
-        }
-      }))
+      // LAN peer 单独收集（dedupe 后可能被更快的 frp 记录覆盖，但 LAN 线仍要画）
+  var lanMap = {}
+  filterSelfPeers(data.peers || [], data.nodeName).forEach(function (p) {
+    var t = p.tunnel || {}
+    if (isLanPeer(p)) lanMap[peerDeviceKey(p.name)] = { up: Boolean(p.up), host: t.host, port: t.port, ip: t.ip || '' }
+  })
+  var nodes = [{
+    key: 'local',
+    local: true,
+    devKey: peerDeviceKey(data.nodeName),
+    up: true,
+    name: nodeDisplay(data.nodeName),
+    dsh: localUp + '/' + instances.length,
+    ports: instances.map(function (inst) { return { port: inst.port, up: inst.up } }),
+    extra: ''
+  }].concat(peers.map(function (peer) {
+    var ls = deviceLinkState(data, peer, lanMap)
+    return {
+      key: 'peer:' + peer.name,
+      local: false,
+      devKey: ls.devKey,
+      up: ls.anyUp,
+      publicUp: ls.publicUp,
+      sakuraUp: ls.sakuraUp,
+      sakuraTunnel: ls.sakuraTunnel,
+      lanUp: ls.lanUp,
+      lanTunnel: ls.lanTunnel,
+      name: nodeDisplay(ls.devKey),
+      dsh: String(peer.instancesCount || 0),
+      ports: peer.instancesList || [],
+      latencyMs: peer.latencyMs,
+      tunnel: peer.tunnel || {},
+      error: peer.error || ''
+    }
+  }))
+  // 2026-11-10：按共用顺序排序（与 Viewport 拖拽位置表一致，修复"拖 A 动 B"的 bug）
+  var orderKeys = orderedNodeKeys(data)
+  nodes.sort(function (a, b) { return orderKeys.indexOf(a.key) - orderKeys.indexOf(b.key) })
+  // 基础设施节点（中转服务器）：阿里云 / 樱花
+  var sakuraAcc = sakuraAccountOf(data)
+  var aliyunPorts = peers.map(function (p) { return isLanPeer(p) ? null : (p.tunnel || {}).port }).filter(Boolean)
+  var infra = [
+    { key: 'server-aliyun', transport: 'public', name: '阿里云服务器 · ECS', host: 'relay.example.com', color: TRANSPORTS.public.color, detail: '隧道 ' + (aliyunPorts.length ? aliyunPorts.sort().join('/') : '—'), up: true },
+    { key: 'server-sakura', transport: 'sakura', name: '樱花穿透服务器', host: 'relay.example.com / relay.example.com / relay.example.com', color: TRANSPORTS.sakura.color, detail: sakuraAcc ? (sakuraAcc.online + '/' + sakuraAcc.total + ' 在线') : '未采集', up: Boolean(sakuraAcc) },
+  ]
+  // 2026-11-09-v8：服务器默认位置贴住扇形最高一排设备（用户要求缩小服务器↔设备的垂直间隔）
+  function infraDefaultPos(idx) {
+    var dx = layout.cardW * 1.08
+    var ox = layout.baseOffsetX || 0
+    var oy = layout.baseOffsetY || 0
+    var cx = ox + (layout.contentW || layout.W) / 2
+    var topYAbs = oy + (layout.topDeviceY || 0)
+    return [Math.round(cx + (idx === 0 ? -dx : dx)), Math.round(topYAbs - layout.cardH * 1.05)]
+  }
+  var infraState = useState(function () { try { return JSON.parse(window.localStorage.getItem('dsh-mesh-ui.infra.v2') || '{}') || {} } catch (e) { return {} } })
+  var infraPos = infraState[0]
+  var setInfraPos = infraState[1]
+  function infraPosition(idx) { var k = infra[idx].key; var v = infraPos[k]; if (v && v.length === 2) return v; var def = DEFAULT_INFRA_POS[infra[idx].transport === 'public' ? 'aliyun' : 'sakura']; if (def) return [def[0], def[1]]; return infraDefaultPos(idx) }
+  useEffect(function () {
+    if (!props.resetNonce) return
+    try { window.localStorage.removeItem('dsh-mesh-ui.infra.v2') } catch (e) { /* ignore */ }
+    setInfraPos({})
+  }, [props.resetNonce])
+  function infraMove(key, pos) { setInfraPos(function (prev) { var next = Object.assign({}, prev); next[key] = pos; try { window.localStorage.setItem('dsh-mesh-ui.infra.v2', JSON.stringify(next)) } catch (e) { /* ignore */ } return next }) }
 
-      var halfW = layout.cardW / 2
-      var halfH = layout.cardH / 2
-      var GAP_EDGE = 6
-      function edgePoint(from, to) {
+  var GAP_EDGE = 6
+      function edgePoint(from, to, hw, hh) {
         var dx = to[0] - from[0]
         var dy = to[1] - from[1]
         var len = Math.sqrt(dx * dx + dy * dy) || 1
         var ux = dx / len
         var uy = dy / len
-        var tx = ux === 0 ? Infinity : (halfW + GAP_EDGE) / Math.abs(ux)
-        var ty = uy === 0 ? Infinity : (halfH + GAP_EDGE) / Math.abs(uy)
+        var tx = ux === 0 ? Infinity : (hw + GAP_EDGE) / Math.abs(ux)
+        var ty = uy === 0 ? Infinity : (hh + GAP_EDGE) / Math.abs(uy)
         var t = Math.min(tx, ty)
         return [from[0] + ux * t, from[1] + uy * t]
       }
 
-      return h('div', null,
-        h('svg', { className: 'dm-lines', width: layout.W, height: layout.H, viewBox: '0 0 ' + layout.W + ' ' + layout.H },
-          layout.edges.map(function (edge, k) {
-            var a = nodes[edge[0]]
-            var b = nodes[edge[1]]
-            var pa = layout.positions[edge[0]]
-            var pb = layout.positions[edge[1]]
-            var bothUp = a && b && a.up && b.up
-            var sa = edgePoint(pa, pb)
-            var sb = edgePoint(pb, pa)
-            var mx = (sa[0] + sb[0]) / 2
-            var my = (sa[1] + sb[1]) / 2
-            var dx = sb[0] - sa[0]
-            var dy = sb[1] - sa[1]
-            var len = Math.sqrt(dx * dx + dy * dy) || 1
-            var bow = Math.min(12, len * 0.06)
-            return h('path', {
-              key: 'e' + k,
-              d: 'M ' + sa[0] + ' ' + sa[1] + ' Q ' + (mx + (-dy / len) * bow) + ' ' + (my + (dx / len) * bow) + ' ' + sb[0] + ' ' + sb[1],
-              fill: 'none',
-              stroke: bothUp ? 'rgba(63,185,80,.42)' : 'rgba(248,81,73,.55)',
-              strokeWidth: 1.8,
-              strokeDasharray: bothUp ? 'none' : '6 5'
-            })
-          })
-        ),
-        h('div', { className: 'dm-world-label' }, layout.count + ' 节点 · ' + layout.edges.length + ' 条链路 · 点击节点看详情'),
-        nodes.map(function (node, i) {
-          var pos = layout.positions[i]
-          var selected = props.selectedKey === node.key
-          return h('div', {
-            key: node.key,
-            className: 'dm-card-node compact' + (node.local ? ' local' : '') + (node.up ? '' : ' down') + (selected ? ' selected' : ''),
-            style: { left: pos[0] + 'px', top: pos[1] + 'px', width: layout.cardW + 'px', minHeight: layout.cardH + 'px', transform: 'translate(-50%,-50%)' },
-            onClick: function () { if (props.onSelect) props.onSelect(node.key) },
-            title: '点击查看 ' + node.name + ' 的详情'
-          },
-            h('div', { className: 'dm-n-head' },
-              h('div', { className: 'dm-n-name' }, h('span', { className: 'dm-dot ' + (node.up ? 'ok' : 'bad') }), h('span', { className: 'dm-ell' }, node.name)),
-              node.local
-                ? h('span', { className: 'dm-chip ok' }, '本机')                 : (node.up ? h('span', { className: 'dm-extra' }, node.extra || '') : h('span', { className: 'dm-chip bad' }, '离线'))
-            ),
-            h('div', { className: 'dm-card-domain', title: node.domain }, node.domain),
-            node.comm ? h('div', { className: 'dm-relay-tag' }, node.comm) : null,
-            node.up ? null : h('div', { className: 'dm-offline-row', title: (node.error || '') }, '离线' + (node.error ? ' · ' + node.error : ' · 无法连接') + (node.detectedAt ? ' · 最后探测 ' + new Date(node.detectedAt).toLocaleTimeString() : '')),
-            h('div', { className: 'dm-card-dsh' },
-              h('span', { className: 'dm-chip' }, 'DSH ' + node.dsh + (node.local ? ' 在线' : ' 个')),
-              (node.ports || []).map(function (item, pi) {
-                return h('span', { key: pi, className: 'dm-chip' + (item.up ? ' run' : ' bad'), title: (item.up ? '在线' : '离线') }, String(item.port))
-              })
-            )
-          )
-        })
-      )
+      // 2026-11-09：三通道连线（设备→阿里云 / 设备→樱花 / 局域网直连）+ 中转服务器卡片 + 筛选
+  var show = props.show || { lan: true, public: true, sakura: true }
+  // 2026-11-09：悬浮节点 → 只高亮它的连线并显示完整地址（其它线变淡）
+  var hoverState = useState(null)
+  var hoverKey = hoverState[0]
+  var setHoverKey = hoverState[1]
+  function edgeRelated(aKey, bKey) { return hoverKey ? (hoverKey === aKey || hoverKey === bKey) : true }
+  var infraRefs = useRef({})
+  var infraSizeState = useState({})
+  var infraSizes = infraSizeState[0]
+  var setInfraSizes = infraSizeState[1]
+  useEffect(function () {
+    var next = {}
+    var changed = false
+    Object.keys(infraRefs.current).forEach(function (key) {
+      var el = infraRefs.current[key]
+      if (!el) return
+      var w = el.offsetWidth
+      var h2 = el.offsetHeight
+      if (!w || !h2) return
+      next[key] = { w: w, h: h2 }
+      var old = infraSizes[key]
+      if (!old || Math.abs(old.w - w) > 1 || Math.abs(old.h - h2) > 1) changed = true
+    })
+    if (!Object.keys(next).length) return
+    if (changed) setInfraSizes(next)
+  })
+  function sizeOf(key) { return cardSizes[key] || infraSizes[key] || { w: layout.cardW, h: layout.cardH } }
+  function curve(key, from, to, up, transport, label, fromSize, toSize, highlight) {
+    var a = edgePoint(from, to, fromSize.w / 2, fromSize.h / 2)
+    var b = edgePoint(to, from, toSize.w / 2, toSize.h / 2)
+    var mx = (a[0] + b[0]) / 2
+    var my = (a[1] + b[1]) / 2
+    var dx = b[0] - a[0]
+    var dy = b[1] - a[1]
+    var len = Math.sqrt(dx * dx + dy * dy) || 1
+    var bow = Math.min(12, len * 0.07)
+    var color = up ? transport.color : DOWN_COLOR
+    var dash = up ? (transport.dash ? '6 5' : 'none') : '6 5'
+    var related = highlight !== false
+    var els = [h('path', {
+      key: key,
+      d: 'M ' + a[0] + ' ' + a[1] + ' Q ' + (mx + (-dy / len) * bow) + ' ' + (my + (dx / len) * bow) + ' ' + b[0] + ' ' + b[1],
+      fill: 'none', stroke: color, strokeWidth: 1.8, strokeDasharray: dash,
+      className: up ? (transport.dash ? 'dm-edge-frp' : 'dm-edge-solid') : 'dm-edge-down',
+      opacity: related ? 1 : 0.12
+    })]
+    if (label) {
+      els.push(h('text', { key: key + '-t', className: 'dm-edge-label', x: mx + (-dy / len) * bow, y: my + (dx / len) * bow - 4, fill: color, fontSize: 9, textAnchor: 'middle', style: { display: (hoverKey && related) ? 'block' : 'none' } }, label))
     }
+    return els
+  }
+  var svgEls = []
+  var aliyunPos = infraPosition(0)
+  var sakuraPos = infraPosition(1)
+  var aliyunSize = infraSizes['server-aliyun'] || { w: 300, h: 90 }
+  var sakuraSize = infraSizes['server-sakura'] || { w: 300, h: 90 }
+  var infraBoxes = []
+  if (show.public) infraBoxes.push({ x: aliyunPos[0], y: aliyunPos[1], w: aliyunSize.w, h: aliyunSize.h })
+  if (show.sakura) infraBoxes.push({ x: sakuraPos[0], y: sakuraPos[1], w: sakuraSize.w, h: sakuraSize.h })
+  if (props.onInfraBounds) props.onInfraBounds(infraBoxes)
+  var localKey = peerDeviceKey(data.nodeName)
+  var localPub = localTunnel.publicEntry || localTunnel.selfHosted || null
+  var localSak = sakuraTunnelOf(data, localKey)
+  // 2026-11-10：LAN 线必须从本机节点出发（排序后 local 可能不在 index 0，之前误连到peer-x）
+  var localNodeIdx = 0
+  nodes.forEach(function (n, ii) { if (n.local) localNodeIdx = ii })
+  nodes.forEach(function (n, i) {
+    var pa = layout.positions[i]
+    if (n.local) {
+      // 主机自己的两条上级链路：自建 frps（阿里云） + 本机樱花隧道
+      if (show.public && localPub) svgEls = svgEls.concat(curve('pub-local', pa, aliyunPos, true, TRANSPORTS.public, localPub.host + ':' + localPub.port, sizeOf('local'), aliyunSize, edgeRelated('local', 'server-aliyun')))
+      if (show.sakura && localSak) svgEls = svgEls.concat(curve('sak-local', pa, sakuraPos, localSak.online === true, TRANSPORTS.sakura, localSak.addr || '', sizeOf('local'), sakuraSize, edgeRelated('local', 'server-sakura')))
+      return
+    }
+    var sizeN = sizeOf(n.key)
+    if (show.public) svgEls = svgEls.concat(curve('pub' + i, pa, aliyunPos, n.publicUp, TRANSPORTS.public, 'relay.example.com' + ((n.tunnel && n.tunnel.port) ? ':' + n.tunnel.port : ''), sizeN, aliyunSize, edgeRelated(n.key, 'server-aliyun')))
+    if (show.sakura && n.sakuraTunnel) svgEls = svgEls.concat(curve('sak' + i, pa, sakuraPos, n.sakuraUp === true, TRANSPORTS.sakura, n.sakuraTunnel.addr || '', sizeN, sakuraSize, edgeRelated(n.key, 'server-sakura')))
+    if (show.lan && n.lanUp) { var lt = n.lanTunnel || {}; var lanAddr = (lt.ip || lt.host || 'LAN') + (lt.port ? ':' + lt.port : ''); svgEls = svgEls.concat(curve('lan' + i, layout.positions[localNodeIdx], pa, n.lanUp, TRANSPORTS.lan, lanAddr, sizeOf('local'), sizeN, edgeRelated('local', n.key))) }
+  })
+  return h('div', null,
+    h('svg', { className: 'dm-lines', width: layout.W, height: layout.H, viewBox: '0 0 ' + layout.W + ' ' + layout.H }, svgEls),
+    nodes.map(function (node, i) {
+      var pos = layout.positions[i]
+      var selected = props.selectedKey === node.key
+      var types = dshTypesFor(node.devKey)
+      return h('div', {
+        key: node.key,
+        className: 'dm-card-node compact draggable' + (node.local ? ' local' : '') + (node.up ? '' : ' down') + (selected ? ' selected' : '') + (hoverKey === node.key ? ' hovered' : '') + (dragKey === node.key ? ' dragging' : ''),
+        onMouseEnter: function () { setHoverKey(node.key) },
+        onMouseLeave: function () { setHoverKey(null) },
+        style: { left: pos[0] + 'px', top: pos[1] + 'px', maxWidth: '380px', transform: 'translate(-50%,-50%)' },
+        ref: function (el) { if (el) cardRefs.current[node.key] = el; else delete cardRefs.current[node.key] },
+        onPointerDown: function (event) { cardPointerDown(node, pos, event) },
+        onPointerMove: function (event) { cardPointerMove(node, event) },
+        onPointerUp: function (event) { cardPointerUp(node, event) },
+        onPointerCancel: cardPointerCancel,
+        title: '拖拽调整位置 · 单击查看 ' + node.name + ' 的详情'
+      },
+        h('div', { className: 'dm-n-head' },
+          h('div', { className: 'dm-n-name' }, h('span', { className: 'dm-dot ' + (node.up ? 'ok' : 'bad') }), h('span', { className: 'dm-ell' }, node.name)),
+          node.local ? h('span', { className: 'dm-chip ok' }, '本机')
+            : (node.up ? h('span', { className: 'dm-extra' }, node.latencyMs == null ? '' : node.latencyMs + 'ms') : h('span', { className: 'dm-chip bad' }, '离线'))
+        ),
+        node.up ? null : h('div', { className: 'dm-offline-row' }, '全部链路不可用' + (node.error ? ' · ' + node.error : '')),
+        h('div', { className: 'dm-card-dsh' },
+          types.map(function (tp, ti) { return h('span', { key: 't' + ti, className: 'dm-chip type' }, tp) }),
+          (node.ports || []).map(function (item, pi) {
+            return h('span', { key: pi, className: 'dm-chip' + (item.up ? ' run' : ' bad'), title: (item.up ? '在线' : '离线') }, String(item.port))
+          })
+        )
+      )
+    }),
+    (show.public ? h('div', {
+      key: 'server-aliyun',
+      className: 'dm-card-node server' + (infra[0].up ? '' : ' down') + (hoverKey === 'server-aliyun' ? ' hovered' : ''),
+      onMouseEnter: function () { setHoverKey('server-aliyun') },
+      onMouseLeave: function () { setHoverKey(null) },
+      style: { left: aliyunPos[0] + 'px', top: aliyunPos[1] + 'px', maxWidth: '360px', transform: 'translate(-50%,-50%)', borderColor: TRANSPORTS.public.color },
+      ref: function (el) { if (el) infraRefs.current['server-aliyun'] = el; else delete infraRefs.current['server-aliyun'] },
+      onPointerDown: function (event) { cardPointerDown({ key: 'server-aliyun' }, aliyunPos, event) },
+      onPointerMove: function (event) { cardPointerMove({ key: 'server-aliyun' }, event) },
+      onPointerUp: function (event) { cardPointerUp({ key: 'server-aliyun' }, event) },
+      onPointerCancel: cardPointerCancel
+    },
+      h('div', { className: 'dm-n-head' }, h('div', { className: 'dm-n-name' }, h('span', { className: 'dm-dot ok' }), h('span', {}, infra[0].name))),
+      h('div', { className: 'dm-card-domain' }, infra[0].host),
+      h('div', { className: 'dm-card-dsh' }, h('span', { className: 'dm-chip', style: { borderColor: TRANSPORTS.public.color, color: TRANSPORTS.public.color } }, 'frps'), h('span', { className: 'dm-chip' }, infra[0].detail))
+    ) : null),
+    (show.sakura ? h('div', {
+      key: 'server-sakura',
+      className: 'dm-card-node server' + (infra[1].up ? '' : ' down') + (hoverKey === 'server-sakura' ? ' hovered' : ''),
+      onMouseEnter: function () { setHoverKey('server-sakura') },
+      onMouseLeave: function () { setHoverKey(null) },
+      style: { left: sakuraPos[0] + 'px', top: sakuraPos[1] + 'px', maxWidth: '360px', transform: 'translate(-50%,-50%)', borderColor: TRANSPORTS.sakura.color },
+      ref: function (el) { if (el) infraRefs.current['server-sakura'] = el; else delete infraRefs.current['server-sakura'] },
+      onPointerDown: function (event) { cardPointerDown({ key: 'server-sakura' }, sakuraPos, event) },
+      onPointerMove: function (event) { cardPointerMove({ key: 'server-sakura' }, event) },
+      onPointerUp: function (event) { cardPointerUp({ key: 'server-sakura' }, event) },
+      onPointerCancel: cardPointerCancel
+    },
+      h('div', { className: 'dm-n-head' }, h('div', { className: 'dm-n-name' }, h('span', { className: 'dm-dot ' + (infra[1].up ? 'ok' : 'bad') }), h('span', {}, infra[1].name))),
+      h('div', { className: 'dm-card-domain' }, infra[1].host),
+      h('div', { className: 'dm-card-dsh' }, h('span', { className: 'dm-chip', style: { borderColor: TRANSPORTS.sakura.color, color: TRANSPORTS.sakura.color } }, 'Sakura'), h('span', { className: 'dm-chip' }, infra[1].detail))
+    ) : null)
+  )
+}
 
-    // ---------- 画布下方：设备详情（默认全展示，点卡片高亮对应项） ----------
+// ---------- 画布下方：设备详情（默认全展示，点卡片高亮对应项） ----------
     function DeviceDetails(props) {
       var data = props.data
       var peers = filterSelfPeers(dedupePeers(data.peers || []), data.nodeName)
@@ -669,19 +1236,23 @@ function nodeLabel(name) { return NODE_LABELS[String(name || '').toLowerCase()] 
       var tunnels = localTunnel.tunnels || []
       var entry = localTunnel.publicEntry || null
       var tunnelNames = tunnels.map(function (x) { return x.name + '→' + x.host + ':' + x.port }).join(' / ')
+      var mainSrc = localTunnel.mainSource || (entry && entry.source === 'self-hosted-frps' ? 'self-hosted' : (entry ? 'sakura' : 'none'))
+      var entryText = entry && entry.host
+        ? entry.host + ':' + entry.port + (mainSrc === 'self-hosted' ? '（自建 frps · 主用）' : (mainSrc === 'sakura' ? '（Sakura · 备用）' : ''))
+        : '未配置'
       var localTunnelRows = [
-        ['公网入口', entry && entry.host ? entry.host + ':' + entry.port : '未配置'],
-        ['本地监听', (localTunnel.bind || '?') + ':' + (localTunnel.port || '?') + (localTunnel.tls ? ' (TLS)' : '')],
-        ['frp 状态', localTunnel.frpRunning ? '运行中 ×' + (localTunnel.frpcCount || 1) : '未运行']
+        ['入口', entryText],
+        ['监听 / frpc', (localTunnel.bind || '?') + ':' + (localTunnel.port || '?') + (localTunnel.tls ? ' (TLS)' : '') + ' · ' + (localTunnel.frpRunning ? 'frpc ×' + (localTunnel.frpcCount || 1) : 'frpc 未运行')]
       ]
-      if (tunnels.length) localTunnelRows.push(['隧道', tunnels.map(function (x) { return x.name }).join(' / ')])
+      if (tunnels.length) localTunnelRows.push(['Sakura 备用', tunnels.map(function (x) { return x.host + ':' + x.port }).join(' / ')])
+      if (mainSrc === 'self-hosted' && localTunnel.selfHosted && localTunnel.selfHosted.configPath) localTunnelRows.push(['frpc 配置', localTunnel.selfHosted.configPath])
       var localTunnelAll = tunnelNames
       var memText = hw.memTotalGB ? ((hw.memFreeGB != null ? hw.memFreeGB : '?') + ' / ' + hw.memTotalGB + ' GB') : '—'
       var cpuText = hw.cpuModel ? hw.cpuModel + ' · ' + (hw.cpuCores || '?') + ' 线程' : '—'
 
       var devices = [{
         key: 'local',
-        name: nodeLabel(data.nodeName) + '（本机）',
+        name: nodeDisplay(data.nodeName) + '（本机）',
         up: Boolean(endpoint.up),
         rows: [
           ['操作系统', hw.os || '—'],
@@ -698,19 +1269,17 @@ function nodeLabel(name) { return NODE_LABELS[String(name || '').toLowerCase()] 
         var t = peer.tunnel || {}
         return {
           key: 'peer:' + peer.name,
-          name: nodeLabel(peerDeviceKey(peer.name)),
+          name: nodeDisplay(peerDeviceKey(peer.name)),
           up: Boolean(peer.up),
           rows: [
             ['操作系统', peer.os || '—'],
             ['运行时长', uptimeText(peer.uptimeSec)],
-            ['节点 pid / tools', (peer.nodePid == null ? '—' : peer.nodePid) + ' / ' + (peer.nodeTools == null ? '—' : peer.nodeTools)],
             ['DSH 实例', (peer.instancesCount || 0) + ' 个（' + ((peer.instancesList || []).map(function (x) { return x.port + (x.up ? '✓' : '✗') }).join(' ') || '—') + '）'],
             ['会话 / 运行', (peer.sessions || 0) + ' / ' + (peer.running || 0)],
             ['任务（进行中）', peer.tasksActive == null ? '—' : String(peer.tasksActive)],
-            ['公网入口', t.host ? t.host + (t.port ? ':' + t.port : '') : '—'],
-            ['链路类型', commLabel(peer, relayHosts).text],
-            ['链路', (peer.up ? (peer.latencyMs == null ? '—' : peer.latencyMs + 'ms') : '离线') + ' · ' + (peer.tls ? 'TLS ✓' : 'TLS ✗') + ' · v' + (peer.version || '?')],
-            ['CPU / 内存', '对端未暴露，无法直读'],
+            ['入口', t.host ? t.host + (t.port ? ':' + t.port : '') : '—'],
+            ['链路', commLabel(peer, relayHosts).text + ' · ' + (peer.up ? (peer.latencyMs == null ? '—' : peer.latencyMs + 'ms') : '离线') + ' · ' + (peer.tls ? 'TLS ✓' : 'TLS ✗') + ' · v' + (peer.version || '?')],
+            ['节点 pid / tools', (peer.nodePid == null ? '—' : peer.nodePid) + ' / ' + (peer.nodeTools == null ? '—' : peer.nodeTools)],
             ['检测时间', clockText(peer.detectedAt || data.at)]
           ]
         }
@@ -862,8 +1431,9 @@ function nodeLabel(name) { return NODE_LABELS[String(name || '').toLowerCase()] 
           h('button', { className: 'dm-btn primary', onClick: function () { load(true) } }, loading ? '刷新中…' : '刷新')
         ),
         error ? h('div', { className: 'dm-err' }, error) : null,
-        h(RelayLayer, { data: data }),
+
         h(Viewport, { data: data, layout: computeLayout(1 + filterSelfPeers(dedupePeers(data.peers || []), data.nodeName).length), selectedKey: selectedKey, onSelect: setSelectedKey }),
+        h(InfraPanels, { data: data }),
         h(DeviceDetails, { data: data, selectedKey: selectedKey }),
         h(Details, { title: '本机实例', badge: ((data.local && data.local.instances) || []).length, open: true }, h(InstanceList, { data: data })),
         h(Details, { title: '版本一致性', badge: versions.length ? versions.length + ' 处升级' : '一致' },

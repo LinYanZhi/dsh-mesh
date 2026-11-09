@@ -77,7 +77,14 @@ export function listDelegations(limit = 50) {
 }
 
 /** 对端是 POSIX 时把 Windows 拼接产生的 \root\Code\... 归一化成 /root/workspace/...。 */
-
+function posixPath(raw) {
+  const s = String(raw || "")
+  if (!s) return s
+  if (/^[A-Za-z]:[\\/]/.test(s)) return s        // 本机盘符路径（Windows 对端）不动
+  if (s.startsWith("\\\\")) return s              // UNC 路径不动
+  if (s.startsWith("\\") || s.includes("\\")) return s.replace(/\\/g, "/")  // \root\Code -> /root/workspace
+  return s
+}
 /** 读对端某个 JSON 文件（只读 fs_read，路径来自本地台账 task.paths）。 */
 async function readPeerJson(repo, node, filePath) {
   if (!repo || !node || !filePath) return null
