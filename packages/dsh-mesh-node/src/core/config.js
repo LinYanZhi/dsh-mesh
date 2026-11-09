@@ -84,6 +84,18 @@ export const DEFAULT_ALLOW = [
   'delegate_gc'
 ]
 
+/** 文件/检索工具（v7.1 加入默认 ACL；老默认列表会自动升级，自定义列表保持不动） */
+export const FILE_TRANSFER_TOOLS = [
+  'file_read_chunk',
+  'file_write_chunk',
+  'file_hash',
+  'transfer_usage',
+  'find_files',
+  'search_text',
+  'tool_inventory'
+]
+const PREVIOUS_DEFAULT_ALLOW = DEFAULT_ALLOW.filter((name) => !FILE_TRANSFER_TOOLS.includes(name))
+
 /**
  * Host bridge instances this node knows about. `dsh0`/`dsh1` mirror the
  * two-DSH-per-machine convention (profile `~/.dsh0` / `~/.dsh1` on ports
@@ -384,6 +396,24 @@ function migrateConfig(raw) {
     if (addedProfiles > 0) notes.push(`hosts[].profileDir: derived for ${addedProfiles} instance(s)`)
     raw.version = 7
     notes.push('config version 6 -> 7 (repair tooling)')
+  }
+  // v7.1: 文件/检索工具加入默认 ACL。老默认列表自动补齐；即便 ACL 被小幅自定义过，
+  // 只要仍是正常节点 ACL（含 mesh_self + fs_read），也补上这 7 个工具——否则跨机传文件/
+  // 检索会一直 E_DENIED，用户又得手工改 ACL（2026-11-09 教训）。
+  const allowNow = Array.isArray(raw?.acl?.allow) ? raw.acl.allow : []
+  if (allowNow.includes('mesh_self') && allowNow.includes('fs_read')) {
+    const next = new Set(allowNow)
+    let added = 0
+    for (const name of FILE_TRANSFER_TOOLS) {
+      if (!next.has(name)) {
+        next.add(name)
+        added += 1
+      }
+    }
+    if (added > 0) {
+      raw.acl = { ...(raw.acl || {}), allow: [...next] }
+      notes.push(`acl.allow: + ${added} file/search tool(s) (default allow-list upgrade)`)
+    }
   }
   return notes
 }
