@@ -51,6 +51,12 @@ Tokens use **role capability packs** instead of per-tool allowlists:
 - Inspect / migrate: `dsh-mesh token list`, `dsh-mesh token migrate-roles [--yes]` (auto-infers observer/controller/node from legacy ACLs, backs up `secrets.json` first, keeps custom ACLs).
 - If a call returns `E_DENIED`, do **not** retry in a loop: either switch the token role or delegate the action to the target machine's AI.
 
+## File transfer (quota-limited)
+
+- ile_read_chunk / ile_write_chunk move base64 chunks: **4 MB per chunk, 256 MB per file, 2 GB per day** by default (config.transfer).
+- ile_hash (sha256) and 	ransfer_usage verify and report usage. Prefer LAN/direct links; relay bandwidth is limited.
+- ind_files uses Everything es.exe when present, else d; search_text uses ipgrep; 	ool_inventory lists what the node has.
+
 ## Verify after install
 
 ```sh

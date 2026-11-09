@@ -59,6 +59,13 @@ const M3_DEFAULT_ALLOW = [
 export const DEFAULT_ALLOW = [
   ...M3_DEFAULT_ALLOW,
   'fs_stats',
+  'file_read_chunk',
+  'file_hash',
+  'transfer_usage',
+  'find_files',
+  'search_text',
+  'tool_inventory',
+  'file_write_chunk',
   'host_instances',
   'mesh_overview',
   'host_self',
@@ -177,6 +184,12 @@ export function defaultConfig() {
       channelWaitMs: 180000,
       channelPollMs: 800,
       channelMaxMessages: 60
+    },
+    /** 文件传输限额（公网/内网流量有成本）：单块/单文件/每日总量，字节 */
+    transfer: {
+      maxChunkBytes: 4194304,
+      maxFileBytes: 268435456,
+      dailyBytes: 2147483648
     },
     /** One-time pairing codes: a peer redeems a short code for its own bearer token. */
     pairing: {

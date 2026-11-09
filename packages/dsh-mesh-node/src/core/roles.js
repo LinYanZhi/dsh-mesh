@@ -43,7 +43,13 @@ const OBSERVER = [
   'delegate_list',
   'delegate_status',
   'delegate_candidates',
-  'repair_status'
+  'repair_status',
+  'file_read_chunk',
+  'file_hash',
+  'transfer_usage',
+  'find_files',
+  'search_text',
+  'tool_inventory'
 ]
 
 const CONTROLLER = [
@@ -63,6 +69,7 @@ const CONTROLLER = [
 export const ROLE_PRESETS = {
   observer: { allow: OBSERVER, description: '只读观察：状态 / 文件 / git / 日志 / 委托列表' },
   controller: { allow: CONTROLLER, description: '协调者：观察 + 委托 + 桌面控制（不能跨机写/重启/改配置）' },
+  operator: { allow: [...CONTROLLER, 'file_write_chunk'], description: '操作者：controller + 文件写入/传输（危险，需用户显式指定）' },
   node: { allow: null, description: '节点：继承本机 ACL（与旧行为一致）' },
   admin: { allow: null, description: '管理员：预留，当前等同 node（真正提权需改节点 ACL）' }
 }

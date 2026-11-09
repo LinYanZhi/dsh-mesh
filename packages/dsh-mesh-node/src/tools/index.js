@@ -1,5 +1,6 @@
 import { buildCore } from './core.js'
 import { buildFs } from './fs.js'
+import { buildFiles } from './files.js'
 import { buildGit } from './git.js'
 import { buildShell } from './shell.js'
 import { buildTasks } from './tasks.js'
@@ -23,6 +24,7 @@ export function buildAll(ctx) {
   return [
     ...buildCore(ctx),
     ...buildFs(ctx),
+    ...buildFiles(ctx),
     ...buildGit(ctx),
     ...buildShell(ctx),
     ...buildTasks(ctx),
