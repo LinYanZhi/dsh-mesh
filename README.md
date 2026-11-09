@@ -54,6 +54,8 @@
 - TLS 证书指纹 pin，中继只转发流量，不持有凭据
 - 建议只在你自己的设备之间使用；详见 [SECURITY.md](SECURITY.md)
 
+- 开发历程（为什么从局域网走到自建公网中继）：[docs/HISTORY.md](docs/HISTORY.md)
+
 ## Repository layout
 
 ```
