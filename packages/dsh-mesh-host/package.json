@@ -1,0 +1,32 @@
+{
+  "name": "dsh-mesh-host",
+  "version": "0.0.1",
+  "description": "DSH host-side bridge for dsh-mesh: exposes in-process sessions/agents/tools over loopback HTTP so a mesh server can create sessions, prompt, wake them and call host tools.",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./package.json": "./package.json"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dsh": {
+    "compatibility": {
+      "dshReleases": {
+        "0.2.0-rc.2": "compatible"
+      }
+    }
+  },
+  "files": [
+    "lib",
+    "README.md",
+    "LICENSE"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/LinYanZhi/dsh-mesh.git"
+  },
+  "homepage": "https://github.com/LinYanZhi/dsh-mesh#readme"
+}

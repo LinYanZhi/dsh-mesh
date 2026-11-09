@@ -1,0 +1,4 @@
+# dsh-mesh-ui: settings-page panel
+- insert:
+    - id: dsh-mesh-ui
+      name: dsh-mesh-ui

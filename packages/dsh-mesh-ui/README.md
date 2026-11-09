@@ -1,3 +1,9 @@
-# packages/dsh-mesh-ui/README.md
+# dsh-mesh-ui
 
-> Work in progress - coming with v0.1.0.
+DSH settings-page panel for `dsh-mesh`: AI network topology, peer health, and delegation panel.
+
+```sh
+dsh plugin --profile web add dsh-mesh-ui
+```
+
+See https://github.com/LinYanZhi/dsh-mesh

@@ -1,0 +1,45 @@
+{
+  "name": "dsh-mesh-node",
+  "version": "0.0.1",
+  "description": "Mesh server for dsh-mesh: expose a machine to peer DSH nodes over MCP/HTTPS, with delegation and optional desktop-control tools.",
+  "type": "module",
+  "private": false,
+  "main": "src/index.js",
+  "exports": {
+    ".": "./src/index.js"
+  },
+  "bin": {
+    "dsh-mesh": "src/cli.js"
+  },
+  "files": [
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/node": "^2.1.1",
+    "@modelcontextprotocol/server": "^2.3.1",
+    "selfsigned": "^3.0.1",
+    "ws": "^8.22.0",
+    "zod": "^4.6.7",
+    "@modelcontextprotocol/client": "^2.3.1"
+  },
+  "devDependencies": {},
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/LinYanZhi/dsh-mesh.git"
+  },
+  "homepage": "https://github.com/LinYanZhi/dsh-mesh#readme",
+  "bugs": {
+    "url": "https://github.com/LinYanZhi/dsh-mesh/issues"
+  },
+  "scripts": {
+    "serve": "node src/cli.js serve",
+    "selftest": "node src/selftest.js",
+    "test": "node src/selftest.js"
+  }
+}
