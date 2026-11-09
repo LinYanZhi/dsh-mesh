@@ -1254,22 +1254,55 @@ function deviceLinkState(data, peer, lanMap) {
         var p = String(d.path || '').replace(/[\\/]+$/, '')
         return (d.freeGB != null ? d.freeGB : '?') + ' / ' + d.totalGB + ' GB' + (p ? ' (' + p + ')' : '')
       }
+      // 设备类型：按平台/CPU 形态泛化推断（不依赖任何个人设备表）
+      function formFactorOf(h) {
+        if (!h) return '—'
+        if (h.platform === 'linux' && String(h.arch || '').indexOf('arm') === 0) return '手机'
+        var cpu = String(h.cpuModel || '')
+        return cpu ? '主机' : '—'
+      }
+      function memTextOf(h) {
+        return h && h.memTotalGB ? ((h.memFreeGB != null ? h.memFreeGB : '?') + ' / ' + h.memTotalGB + ' GB') : '—'
+      }
+      function cpuTextOf(h) {
+        return h && h.cpuModel ? h.cpuModel + ' · ' + (h.cpuCores || '?') + ' 线程' : '—'
+      }
+      function ipKindOf(peer) {
+        var t = peer.tunnel || {}
+        if (t.kind === 'loopback') return '本机回环'
+        if (t.kind === 'lan') return '局域网直连'
+        if (t.kind === 'frp') return '公网穿透（域名）'
+        if (t.kind === 'wan') return relayHosts[String(t.host || '').toLowerCase()] ? '公网（共享中转）' : '公网 IP 直连'
+        return '—'
+      }
+      function relayKindOf(peer) {
+        var t = peer.tunnel || {}
+        if (t.kind === 'loopback') return '无（本机回环）'
+        if (t.kind === 'lan') return '无（局域网直连）'
+        if (t.kind === 'frp') return 'Sakura / 第三方 frp 穿透'
+        if (t.kind === 'wan') return relayHosts[String(t.host || '').toLowerCase()] ? '自建公网中继（frps）' : '公网 IP 直连'
+        return '—'
+      }
+      function dshVerOf(peer) {
+        var v = peer.version ? 'v' + peer.version : '—'
+        if (peer.plugin) v += ' · 插件 ' + peer.plugin
+        return v
+      }
 
       var devices = [{
         key: 'local',
         name: nodeDisplay(data.nodeName) + '（本机）',
         up: Boolean(endpoint.up),
         rows: [
+          ['设备类型', formFactorOf(hw)],
           ['操作系统', hw.os || '—'],
-          ['CPU', cpuText],
-          ['内存', memText],
+          ['内存', memTextOf(hw)],
           ['磁盘', diskText(hw.disk)],
-          ['DSH 实例', localUp + '/' + instances.length + ' 在线'],
-          ['会话 / 运行', sessions + ' / ' + running],
-          ['模型', model],
-          ...localTunnelRows,
-          ['端点', (endpoint.pid != null ? 'pid ' + endpoint.pid : '—') + ' · tools ' + (endpoint.tools != null ? endpoint.tools : '—') + ' · mesh ' + (data.meshVersion || '?')],
-          ['检测时间', clockText(data.at)]
+          ['CPU', cpuTextOf(hw)],
+          ['DSH 版本', data.meshVersion ? 'v' + data.meshVersion : '—'],
+          ['IP 类型', '本机回环'],
+          ['端口号', localTunnel.port != null ? String(localTunnel.port) : '—'],
+          ['公网穿透类型', mainSrc === 'self-hosted' ? '自建 frps 中继（主用）' : (mainSrc === 'sakura' ? 'Sakura 穿透（备用）' : '无（仅局域网）')]
         ]
       }].concat(peers.map(function (peer) {
         var t = peer.tunnel || {}
@@ -1279,18 +1312,15 @@ function deviceLinkState(data, peer, lanMap) {
           name: nodeDisplay(peerDeviceKey(peer.name)),
           up: Boolean(peer.up),
           rows: [
+            ['设备类型', formFactorOf(hwp)],
             ['操作系统', hwp.os || peer.os || '—'],
-            ['CPU', hwp.cpuModel ? hwp.cpuModel + ' · ' + (hwp.cpuCores || '?') + ' 线程' : '—'],
-            ['内存', hwp.memTotalGB ? ((hwp.memFreeGB != null ? hwp.memFreeGB : '?') + ' / ' + hwp.memTotalGB + ' GB') : '—'],
+            ['内存', memTextOf(hwp)],
             ['磁盘', diskText(hwp.disk)],
-            ['运行时长', uptimeText(peer.uptimeSec)],
-            ['DSH 实例', (peer.instancesCount || 0) + ' 个（' + ((peer.instancesList || []).map(function (x) { return x.port + (x.up ? '✓' : '✗') }).join(' ') || '—') + '）'],
-            ['会话 / 运行', (peer.sessions || 0) + ' / ' + (peer.running || 0)],
-            ['任务（进行中）', peer.tasksActive == null ? '—' : String(peer.tasksActive)],
-            ['入口', t.host ? t.host + (t.port ? ':' + t.port : '') : '—'],
-            ['链路', commLabel(peer, relayHosts).text + ' · ' + (peer.up ? (peer.latencyMs == null ? '—' : peer.latencyMs + 'ms') : '离线') + ' · ' + (peer.tls ? 'TLS ✓' : 'TLS ✗') + ' · v' + (peer.version || '?')],
-            ['节点 pid / tools', (peer.nodePid == null ? '—' : peer.nodePid) + ' / ' + (peer.nodeTools == null ? '—' : peer.nodeTools)],
-            ['检测时间', clockText(peer.detectedAt || data.at)]
+            ['CPU', cpuTextOf(hwp)],
+            ['DSH 版本', dshVerOf(peer)],
+            ['IP 类型', ipKindOf(peer)],
+            ['端口号', t.port ? String(t.port) : '—'],
+            ['公网穿透类型', relayKindOf(peer)]
           ]
         }
       }))
