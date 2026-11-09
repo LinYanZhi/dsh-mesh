@@ -1,0 +1,13 @@
+node_modules/
+.runtime/
+_tmp/
+.debug/
+*.log
+*.token
+*.secret
+secrets.json
+peers.json
+.credentials*
+*.bak*
+.DS_Store
+dist/
