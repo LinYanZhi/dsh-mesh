@@ -41,21 +41,22 @@ Tokens use **role capability packs** instead of per-tool allowlists:
 | Role | Capabilities | Default use |
 |---|---|---|
 | `observer` | read-only status/files/git/logs + delegation list | watch-only nodes |
-| `controller` | observer + `delegate*` + `pc_*` desktop control | phones / nodes that initiate delegation |
+| `controller` | observer + `delegate*` + `host_session_create/prompt` + `pc_*` desktop control | phones / nodes that initiate delegation |
+| `operator` | controller + `file_write_chunk` (file transfer writes) | explicitly authorized operators |
 | `node` | inherit the node ACL (legacy-compatible) | normal PC nodes |
 | `admin` | reserved; equals node today (real escalation still needs node ACL change) | explicit admin ops |
 
 - Roles only **narrow** the node ACL (intersection); they can never exceed it.
-- `controller` intentionally **excludes** `host_call`, `host_session_*`, `service_restart`, `mesh_config_patch`, `fs_write`, `shell_run`. Dangerous cross-machine work must be delegated to the target machine's AI (which runs locally), never auto-granted.
+- `controller` intentionally **excludes** `host_call`, `service_restart`, `mesh_config_patch`, `plugin_install`, `fs_write`, `shell_run`. Dangerous cross-machine work must be delegated to the target machine's AI (which runs locally), never auto-granted.
 - Enrollment: `dsh-mesh pair --code --role controller` → the peer redeems the code and receives that role; the peer cannot pick its own role.
 - Inspect / migrate: `dsh-mesh token list`, `dsh-mesh token migrate-roles [--yes]` (auto-infers observer/controller/node from legacy ACLs, backs up `secrets.json` first, keeps custom ACLs).
 - If a call returns `E_DENIED`, do **not** retry in a loop: either switch the token role or delegate the action to the target machine's AI.
 
 ## File transfer (quota-limited)
 
-- ile_read_chunk / ile_write_chunk move base64 chunks: **4 MB per chunk, 256 MB per file, 2 GB per day** by default (config.transfer).
-- ile_hash (sha256) and 	ransfer_usage verify and report usage. Prefer LAN/direct links; relay bandwidth is limited.
-- ind_files uses Everything es.exe when present, else d; search_text uses ipgrep; 	ool_inventory lists what the node has.
+- `file_read_chunk` / `file_write_chunk` move base64 chunks: **4 MB per chunk, 256 MB per file, 2 GB per day** by default (`config.transfer`).
+- `file_hash` (sha256) and `transfer_usage` verify and report usage. Prefer LAN/direct links; relay bandwidth is limited.
+- `find_files` uses Everything `es.exe` when present, else `fd`; `search_text` uses `ripgrep`; `tool_inventory` lists what the node has.
 
 ## Verify after install
 
