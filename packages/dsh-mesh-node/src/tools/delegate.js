@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { z } from 'zod'
 import { createHostClient, hostInstances } from '../core/host-agent.js'
 import { buildSessionProfile, classifySession, sessionBlock } from '../core/session-profile.js'
+import { delegationTitle } from '../core/delegation-title.js'
 import { fail, ok } from '../core/result.js'
 // 2026-11-06：MCP 委托也要写 delegations.json 台账（此前只有 CLI 写 → 台账漏记，审计失真）
 import { instanceName, updateRegistry } from '../../scripts/lib/mesh-delegate/common.mjs'
@@ -252,9 +253,14 @@ export function buildDelegate(ctx) {
           .string()
           .max(200)
           .optional()
-          .describe(`Agent preset id the fresh session is composed from (default: ${DEFAULT_AGENT_PRESET}). Ignored for a continuation.`)
+          .describe(`Agent preset id the fresh session is composed from (default: ${DEFAULT_AGENT_PRESET}). Ignored for a continuation.`),
+        title: z
+          .string()
+          .max(120)
+          .optional()
+          .describe('User-owned session title to pin before the first prompt (stops DSH auto-titling). Default: [委托]<first goal line>.')
       }),
-      handler: async ({ goal, scope, acceptance, conversationId, sessionId, instance, workspace, force, agentPreset }) => {
+      handler: async ({ goal, scope, acceptance, conversationId, sessionId, instance, workspace, force, agentPreset, title }) => {
         try {
           const config = ctx.getConfig()
           const root = localRoot(config)
@@ -297,7 +303,9 @@ export function buildDelegate(ctx) {
             const client = createHostClient({ config, home: ctx.home, log: ctx.log, instance: wanted.id })
             const cwd = workspace ? workspace : undefined
             const preset = agentPreset || DEFAULT_AGENT_PRESET
-            const createdSession = await client.createSession({ cwd, agentPreset: preset })
+            // Pin a user-owned title before the first prompt: DSH stops automatic
+            // revisions once a user title exists (session-title rename semantics).
+            const createdSession = await client.createSession({ cwd, agentPreset: preset, title: delegationTitle(goal, title) })
             if (!createdSession?.sessionId) {
               throw new Error(`host bridge did not return a sessionId (plugin too old? need dsh-mesh-host >= 0.2.0): ${JSON.stringify(createdSession)}`)
             }
@@ -334,6 +342,7 @@ export function buildDelegate(ctx) {
             updatedAt: new Date().toISOString(),
             source: 'mcp',
             goal,
+            ...(created ? { title: delegationTitle(goal, title) } : {}),
             scope: scope || '',
             acceptance: acceptance || '',
             paths: {}

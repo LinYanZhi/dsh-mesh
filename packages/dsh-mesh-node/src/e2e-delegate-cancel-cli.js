@@ -14,7 +14,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { spawnSync } from 'node:child_process'
+import { spawn } from 'node:child_process'
 import { z } from 'zod'
 import { McpServer, createMcpHandler } from '@modelcontextprotocol/server'
 import { toNodeHandler } from '@modelcontextprotocol/node'
@@ -32,7 +32,7 @@ async function check(name, fn) {
     console.log(`PASS ${name}`)
   } catch (error) {
     results.push({ name, ok: false, error: error?.message || String(error) })
-    console.log(`FAIL ${name} — ${error?.message || error}`)
+    console.log(`FAIL ${name} - ${error?.message || error}`)
   }
 }
 
@@ -40,20 +40,19 @@ const WAKE_ARGS = z.object({ sessionId: z.string(), text: z.string(), target: z.
 const CANCEL_ARGS = z.object({ taskId: z.string(), reason: z.string().optional() })
 
 /**
- * One fake peer. `handlers` maps tool name -> (args) => tool result payload.
- * A real MCP server is used so "tool not found" is a genuine protocol error, which is
- * exactly what an old mesh node produces.
+ * One fake peer. A real MCP server is used so "tool not found" is a genuine protocol
+ * error, which is exactly what an old mesh node produces.
  */
 function startFakePeer(name, { withCancelTool = false, cancelHandler = null } = {}) {
   const calls = []
-  const server = new McpServer({ name: `fake-peer-${name}`, version: '0.0.0' }, {})
+  const mcpServer = new McpServer({ name: `fake-peer-${name}`, version: '0.0.0' }, {})
   const textResult = (value) => ({ content: [{ type: 'text', text: JSON.stringify(value) }] })
-  server.registerTool('channel_wake', { title: 'wake', description: 'fake wake', inputSchema: WAKE_ARGS }, async (args) => {
+  mcpServer.registerTool('channel_wake', { title: 'wake', description: 'fake wake', inputSchema: WAKE_ARGS }, async (args) => {
     calls.push({ tool: 'channel_wake', args })
     return textResult({ ok: true, delivered: true, wokeUp: true, messageId: 'fake-msg' })
   })
   if (withCancelTool) {
-    server.registerTool('delegate_cancel', { title: 'cancel', description: 'fake cancel', inputSchema: CANCEL_ARGS }, async (args) => {
+    mcpServer.registerTool('delegate_cancel', { title: 'cancel', description: 'fake cancel', inputSchema: CANCEL_ARGS }, async (args) => {
       calls.push({ tool: 'delegate_cancel', args })
       const result = cancelHandler(args)
       if (result?.isError) {
@@ -62,7 +61,7 @@ function startFakePeer(name, { withCancelTool = false, cancelHandler = null } = 
       return textResult(result)
     })
   }
-  const mcpHandler = createMcpHandler(() => server, {})
+  const mcpHandler = createMcpHandler(() => mcpServer, {})
   const nodeHandler = toNodeHandler(mcpHandler)
   const http = createServer((req, res) => {
     // The CLI always sends a bearer token; the fake peer only checks that one exists.
@@ -81,13 +80,25 @@ function startFakePeer(name, { withCancelTool = false, cancelHandler = null } = 
 }
 
 function runCli(home, args) {
+  // Async on purpose: the fake peers are MCP servers inside THIS process, so a blocking
+  // spawnSync would freeze the event loop and every peer call would time out.
   const cli = join(fileURLToPath(new URL('..', import.meta.url)), 'scripts', 'mesh-delegate.mjs')
-  const result = spawnSync(process.execPath, [cli, ...args], {
-    encoding: 'utf8',
-    env: { ...process.env, DSH_MESH_HOME: home },
-    windowsHide: true
+  return new Promise((resolve) => {
+    const child = spawn(process.execPath, [cli, ...args], {
+      env: { ...process.env, DSH_MESH_HOME: home },
+      windowsHide: true,
+      stdio: ['ignore', 'pipe', 'pipe']
+    })
+    let stdout = ''
+    let stderr = ''
+    child.stdout.on('data', (chunk) => {
+      stdout += String(chunk)
+    })
+    child.stderr.on('data', (chunk) => {
+      stderr += String(chunk)
+    })
+    child.on('close', (code) => resolve({ code, stdout, stderr }))
   })
-  return { code: result.status, stdout: String(result.stdout || ''), stderr: String(result.stderr || '') }
 }
 
 function writeHome(home, peers) {
@@ -173,8 +184,8 @@ async function main() {
       { id: 'peer-old', name: 'peer-old', url: peerOld.url, token: 'c'.repeat(64) }
     ])
 
-    await check('modern peer: cancel is a real delegate_cancel and the ledger records it', () => {
-      const run = runCli(home, ['cancel', 'T-OK', '--reason', 'stop drilling'])
+    await check('modern peer: cancel is a real delegate_cancel and the ledger records it', async () => {
+      const run = await runCli(home, ['cancel', 'T-OK', '--reason', 'stop drilling'])
       assert(run.code === 0, `expected exit 0, got ${run.code}: ${run.stderr}`)
       const payload = JSON.parse(run.stdout)
       assert(payload.state === 'cancelled', `state=${payload.state}`)
@@ -189,8 +200,8 @@ async function main() {
       assert(task.cancelVia === 'delegate_cancel', `ledger cancelVia=${task.cancelVia}`)
     })
 
-    await check('old peer without the tool: explicit warning + legacy channel_wake fallback', () => {
-      const run = runCli(home, ['cancel', 'T-OLD'])
+    await check('old peer without the tool: explicit warning + legacy channel_wake fallback', async () => {
+      const run = await runCli(home, ['cancel', 'T-OLD'])
       assert(run.code === 0, `fallback should still exit 0, got ${run.code}: ${run.stderr}`)
       assert(/对端版本旧/u.test(run.stderr), `stderr should warn about the old peer: ${run.stderr}`)
       const payload = JSON.parse(run.stdout)
@@ -203,8 +214,8 @@ async function main() {
       assert(task.state === 'cancelled' && task.cancelVia === 'channel_wake-legacy', `ledger=${JSON.stringify(task)}`)
     })
 
-    await check('old PLUGIN (E_HOST_NO_CANCEL): loud error, no fallback, no wake injection', () => {
-      const run = runCli(home, ['cancel', 'T-OLDPLUGIN'])
+    await check('old PLUGIN (E_HOST_NO_CANCEL): loud error, no fallback, no wake injection', async () => {
+      const run = await runCli(home, ['cancel', 'T-OLDPLUGIN'])
       assert(run.code === 1, `expected exit 1, got ${run.code}`)
       assert(/E_HOST_NO_CANCEL/u.test(run.stderr), `stderr should carry the code: ${run.stderr}`)
       assert(/0\.5\.0/u.test(run.stderr), `stderr should name the required plugin version: ${run.stderr}`)
@@ -222,7 +233,7 @@ async function main() {
   const failed = results.filter((row) => !row.ok)
   console.log(`\n${results.length - failed.length}/${results.length} PASS`)
   if (failed.length > 0) {
-    for (const row of failed) console.log(`FAILED: ${row.name} — ${row.error}`)
+    for (const row of failed) console.log(`FAILED: ${row.name} - ${row.error}`)
     process.exitCode = 1
   }
 }

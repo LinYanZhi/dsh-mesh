@@ -226,13 +226,14 @@ export function buildHost(ctx) {
       inputSchema: z.object({
         cwd: z.string().max(1000).optional().describe('Workspace/cwd for the new session (default: the instance default).'),
         agentPreset: z.string().max(200).optional().describe('Agent preset id to compose (default: instance default).'),
+        title: z.string().max(120).optional().describe('User-owned session title to pin immediately (stops DSH auto-titling), e.g. [委托]修复登录页.'),
         sessionId: z.string().optional().describe('Adopt this exact session id instead of generating one (rarely needed).'),
         workspaceId: z.string().optional().describe('Attach to a registered workspace id instead of a raw cwd.'),
         instance: instanceSchema
       }),
-      handler: async ({ cwd, agentPreset, sessionId, workspaceId, instance }) => {
+      handler: async ({ cwd, agentPreset, title, sessionId, workspaceId, instance }) => {
         try {
-          return ok(await hostClient(ctx, instance).createSession({ cwd, agentPreset, sessionId, workspaceId }))
+          return ok(await hostClient(ctx, instance).createSession({ cwd, agentPreset, sessionId, workspaceId, title }))
         } catch (error) {
           return hostError(error)
         }

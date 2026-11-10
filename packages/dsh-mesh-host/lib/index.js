@@ -38,7 +38,7 @@ export const name = 'dsh-mesh-host'
 /** Services this plugin needs before `apply` runs. */
 export const inject = ['tools', 'agents']
 
-export const PLUGIN_VERSION = '0.5.0'
+export const PLUGIN_VERSION = '0.6.0'
 const MAX_BODY_BYTES = 256 * 1024
 const DEFAULT_TIMEOUT_MS = 120_000
 
@@ -468,6 +468,7 @@ export function apply(ctx) {
           return json(res, 400, { ok: false, code: 'E_INVALID_ARG', message: 'body must be JSON' })
         }
         const optionalText = (value) => (typeof value === 'string' && value.trim() ? value.trim() : undefined)
+        const title = optionalText(payload.title)
         const request = {
           ...(optionalText(payload.cwd) === undefined ? {} : { cwd: optionalText(payload.cwd) }),
           ...(optionalText(payload.sessionId) === undefined ? {} : { sessionId: optionalText(payload.sessionId) }),
@@ -482,9 +483,26 @@ export function apply(ctx) {
         }
         try {
           const created = await controller.create(request)
+          const sessionId = String(created?.sessionId || '')
+          let acceptedTitle
+          let titleWarning
+          if (title && sessionId) {
+            if (typeof controller.rename !== 'function') {
+              titleWarning = 'sessionController.rename is unavailable in this DSH version'
+            } else {
+              try {
+                const renamed = await controller.rename({ sessionId, title })
+                acceptedTitle = typeof renamed?.title === 'string' ? renamed.title : title
+              } catch (error) {
+                titleWarning = error?.message || String(error)
+              }
+            }
+          }
           return json(res, 200, {
             ok: true,
-            sessionId: String(created?.sessionId || ''),
+            sessionId,
+            ...(acceptedTitle === undefined ? {} : { title: acceptedTitle }),
+            ...(titleWarning === undefined ? {} : { titleWarning }),
             ...(created?.agentPreset === undefined ? {} : { agentPreset: created.agentPreset }),
             plugin: PLUGIN_VERSION
           })
@@ -492,6 +510,45 @@ export function apply(ctx) {
           return json(res, 200, {
             ok: false,
             code: error?.code || 'E_HOST_SESSION_CREATE',
+            message: error?.message || String(error)
+          })
+        }
+      }
+
+      if (req.method === 'POST' && url.pathname === '/host/sessions/rename') {
+        let payload
+        try {
+          payload = JSON.parse((await readBody(req)) || '{}')
+        } catch {
+          return json(res, 400, { ok: false, code: 'E_INVALID_ARG', message: 'body must be JSON' })
+        }
+        const sessionId = typeof payload.sessionId === 'string' ? payload.sessionId.trim() : ''
+        const title = typeof payload.title === 'string' ? payload.title.trim() : ''
+        if (!sessionId || !title) {
+          return json(res, 400, { ok: false, code: 'E_INVALID_ARG', message: 'sessionId and title are required' })
+        }
+        let controller
+        try {
+          controller = requireSessionController()
+        } catch (error) {
+          return json(res, 501, { ok: false, code: error.code || 'E_HOST_NO_CONTROLLER', message: error.message })
+        }
+        if (typeof controller.rename !== 'function') {
+          return json(res, 501, { ok: false, code: 'E_HOST_NO_RENAME', message: 'sessionController.rename is unavailable in this DSH version' })
+        }
+        try {
+          const renamed = await controller.rename({ sessionId, title })
+          return json(res, 200, {
+            ok: true,
+            sessionId,
+            title: typeof renamed?.title === 'string' ? renamed.title : title,
+            ...(renamed?.seq === undefined ? {} : { seq: renamed.seq }),
+            plugin: PLUGIN_VERSION
+          })
+        } catch (error) {
+          return json(res, 200, {
+            ok: false,
+            code: error?.code || 'E_HOST_SESSION_RENAME',
             message: error?.message || String(error)
           })
         }

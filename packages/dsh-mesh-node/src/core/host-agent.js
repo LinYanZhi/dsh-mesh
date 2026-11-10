@@ -227,11 +227,22 @@ export function createHostClient({ config, home, log = console, instance }) {
      * sessionController path). Requires dsh-mesh-host >= 0.2.0; an older
      * plugin answers 404 unknown endpoint.
      */
-    async createSession({ cwd, sessionId, agentPreset, workspaceId } = {}) {
+    async createSession({ cwd, sessionId, agentPreset, workspaceId, title } = {}) {
       return call('/host/sessions/create', {
         method: 'POST',
-        body: { cwd, sessionId, agentPreset, workspaceId },
+        body: { cwd, sessionId, agentPreset, workspaceId, title },
         timeoutMs: 60000
+      })
+    },
+    /**
+     * Pin a user-owned session title (stops DSH's automatic title revisions).
+     * Requires dsh-mesh-host >= 0.6.0; older bridges answer 404.
+     */
+    async renameSession({ sessionId, title } = {}) {
+      return call('/host/sessions/rename', {
+        method: 'POST',
+        body: { sessionId, title },
+        timeoutMs: 30000
       })
     },
     /** Deliver one user prompt into a Session without a web cookie. */

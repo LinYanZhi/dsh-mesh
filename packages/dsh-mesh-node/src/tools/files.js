@@ -150,28 +150,26 @@ function findFiles(ctx, { query, root, limit = 100, exts = null, minSizeBytes = 
   if (!existsSync(absRoot)) return notFound(`root not found: ${absRoot}`)
   const es = toolInfo('es')
   if (es.path) {
-    const args = ['-json', '-n', String(Math.min(limit, 500)), '-path', absRoot]
-    if (exts?.length) args.push('-r', `.*\\.(${exts.map((e) => String(e).replace(/^\\./, '')).join('|')})$`)
-    args.push(String(query || ''))
-    const r = spawnSync(es.path, args, { encoding: 'utf8', windowsHide: true, timeout: 15000 })
-    // es.exe 在 session 0 连不上 Everything IPC 时退出码非 0（stderr: Error 8），必须回退 fd/walk
+    // 2026-11-10：两个实测坑 —— ① ES 输出是系统 ANSI(GBK)，按 UTF-8 解会中文乱码 → buffer + UTF-8 严格→GBK 回退；
+    // ② 多词合成单个 argv 会被 ES 当「字面短语」→ 0 结果，必须拆成多个 argv（ext 过滤也单独一个 argv）
+    const args = ['-n', String(Math.min(limit, 500)), '-path', absRoot]
+    const terms = String(query || '').split(/\s+/).map((s) => s.trim()).filter(Boolean)
+    if (exts?.length) terms.push('ext:' + exts.map((e) => String(e).replace(/^\\./, '')).join(';'))
+    if (terms.length) args.push(...terms)
+    const r = spawnSync(es.path, args, { encoding: "buffer", windowsHide: true, timeout: 15000 })
     if (r.status === 0) {
-      try {
-        const rows = JSON.parse(r.stdout || '[]')
-        return ok({
-          tool: 'everything',
-          count: rows.length,
-          entries: rows.slice(0, 500).map((row) => ({
-            path: String(row.path || row.full_path || ''),
-            name: String(row.name || basename(String(row.path || ''))),
-            type: Number(row.type) === 2 ? 'dir' : 'file',
-            sizeBytes: row.size == null ? null : Number(row.size),
-            mtimeMs: isoMs(row.date_modified)
-          }))
-        })
-      } catch {
-        /* fallthrough */
-      }
+      let text = ""
+      try { text = new TextDecoder("utf-8", { fatal: true }).decode(r.stdout) } catch { try { text = new TextDecoder("gbk").decode(r.stdout) } catch { text = Buffer.from(r.stdout || []).toString("utf8") } }
+      const lines = String(text).split(/\r?\n/).map((s) => s.trim()).filter(Boolean).slice(0, 500)
+      const entries = lines.map((p) => {
+        try {
+          const st = statSync(p)
+          return { path: p, name: basename(p), type: st.isDirectory() ? 'dir' : 'file', sizeBytes: st.isDirectory() ? null : st.size, mtimeMs: Math.round(st.mtimeMs) }
+        } catch {
+          return { path: p, name: basename(p), type: 'file', sizeBytes: null, mtimeMs: null }
+        }
+      })
+      return ok({ tool: 'everything', count: entries.length, entries })
     }
   }
   const fd = toolInfo('fd')

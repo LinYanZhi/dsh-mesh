@@ -67,6 +67,12 @@ const sessionController = {
   prompt: async (request, signal) => {
     sessionCalls.push({ kind: 'prompt', request, signal })
     return { accepted: true }
+  },
+  rename: async request => {
+    sessionCalls.push({ kind: 'rename', request })
+    const agent = agentMap.get(request?.sessionId)
+    if (agent) agent.session.title = request.title
+    return { title: request.title, seq: 99 }
   }
 }
 
@@ -242,6 +248,33 @@ check('sessions/create calls sessionController.create with cwd + preset', async 
   const last = sessionCalls.at(-1)
   assert.equal(last.kind, 'create')
   assert.deepEqual(last.request, { cwd: 'C:/work/repo', agentPreset: 'code' })
+})
+
+check('sessions/create pins a user-owned title when one is supplied', async () => {
+  const { status, body } = await call('POST', '/host/sessions/create', {
+    headers: auth(),
+    body: { cwd: 'C:/work/repo', agentPreset: 'code', title: '[委托]修复登录页' }
+  })
+  assert.equal(status, 200)
+  assert.equal(body.ok, true)
+  assert.equal(body.sessionId, 'sess-created')
+  assert.equal(body.title, '[委托]修复登录页')
+  const last = sessionCalls.at(-1)
+  assert.equal(last.kind, 'rename')
+  assert.deepEqual(last.request, { sessionId: 'sess-created', title: '[委托]修复登录页' })
+})
+
+check('sessions/rename pins a title through sessionController.rename', async () => {
+  const { status, body } = await call('POST', '/host/sessions/rename', {
+    headers: auth(),
+    body: { sessionId: 'sess-idle', title: '[委托]同步代码' }
+  })
+  assert.equal(status, 200)
+  assert.equal(body.ok, true)
+  assert.equal(body.title, '[委托]同步代码')
+  assert.equal(agentMap.get('sess-idle').session.title, '[委托]同步代码')
+  const last = sessionCalls.at(-1)
+  assert.equal(last.kind, 'rename')
 })
 
 check('sessions/create requires the host token', async () => {
