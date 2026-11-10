@@ -460,15 +460,18 @@ body.light .dm-edge-label { stroke: rgba(255,255,255,.92); }
       var layout = props.layout
       // 2026-11-10：按当前筛选的可见服务器数量决定布局（0/1/2）
       var currentFilters = (function () { try { var s = JSON.parse(window.localStorage.getItem('dsh-mesh-ui.filters.v1') || '{}') || {}; return { lan: s.lan !== false, public: s.public !== false, sakura: s.sakura !== false } } catch (_) { return { lan: true, public: true, sakura: true } } })()
-      var serverCount = visibleServerCount(props.data, currentFilters)
+      // 2026-11-10：布局服务器数使用快照；筛选切换只隐藏服务器，不触发重排。
+      var layoutServerState = useState(function () { return visibleServerCount(props.data, currentFilters) })
+      var layoutServerCount = layoutServerState[0]
+      var setLayoutServerCount = layoutServerState[1]
       // 2026-11-09-v5：卡片宽度自适应 —— 子组件测量真实卡片宽高后回传，按实际尺寸重算多边形布局
       var sizeState = useState(null)
       var measuredSize = sizeState[0]
       var setMeasuredSize = sizeState[1]
       if (measuredSize && measuredSize.w > 0 && measuredSize.h > 0) {
-        layout = computeLayout(layout.count, { cardW: measuredSize.w, cardH: measuredSize.h, serverCount: serverCount })
+        layout = computeLayout(layout.count, { cardW: measuredSize.w, cardH: measuredSize.h, serverCount: layoutServerCount })
       } else {
-        layout = computeLayout(layout.count, { serverCount: serverCount })
+        layout = computeLayout(layout.count, { serverCount: layoutServerCount })
       }
       var infraBoundsRef = useRef([])
       // 2026-11-09：重置拓扑时同时通知 Topology 复位服务器卡片
@@ -516,10 +519,12 @@ body.light .dm-edge-label { stroke: rgba(255,255,255,.92); }
       function resetLayout() {
         setMovedLayout({})
         saveMovedLayout({})
+        // 只有点重置时才读取当前勾选服务器并重排；筛选本身不重绘
+        setLayoutServerCount(visibleServerCount(props.data, currentFilters))
         // 2026-11-10：重置只恢复拓扑结构，保留用户手动拖拽的画布高度
         interactedRef.current = false
         bumpResetNonce(function (x) { return x + 1 })
-        setTimeout(fit, 120)
+        setTimeout(fit, 160)
       }
       // 2026-11-09-v3：拖卡片到画布边缘时自动平移视角（不用手动挪画面就能拖很远）
       function autoPanAt(clientX, clientY) {
@@ -655,12 +660,6 @@ body.light .dm-edge-label { stroke: rgba(255,255,255,.92); }
         ro.observe(el)
         return function () { try { ro.disconnect() } catch (_) { /* ignore */ } }
       }, [fit])
-
-      // 2026-11-10：筛选变化后按可见内容重新 fit；去掉的服务器不应继续占布局/留白
-      useEffect(function () {
-        interactedRef.current = false
-        setTimeout(fit, 30)
-      }, [showFilters.lan, showFilters.public, showFilters.sakura])
 
       // 2026-11-10：布局变化（节点数/卡片尺寸）后自动 fit（用户未手动缩放/平移时），避免停留在旧的缩放比例
       useEffect(function () {
@@ -799,7 +798,7 @@ body.light .dm-edge-label { stroke: rgba(255,255,255,.92); }
       var n = Math.max(1, count)
       var span = (2 * Math.PI) / 3
       var step = n > 1 ? span / (n - 1) : 0
-      var radius = Math.max(cardH * 2.1, cardW * 1.25, step > 0 ? (cardW + GAP) / (2 * Math.sin(step / 2)) : 0)
+      var radius = Math.max(cardH * 1.7, step > 0 ? (cardW + GAP) * 0.62 / (2 * Math.sin(step / 2)) : cardW * 0.9)
       var raw = []
       for (var i = 0; i < n; i++) {
         var a = Math.PI / 6 + i * step
