@@ -57,6 +57,9 @@ const CONTROLLER = [
   'delegate',
   'delegate_reply',
   'delegate_gc',
+  // 2026-11-10: 发起端直接终止自己委托的任务（真 abort 当前轮）属于协调者能力；
+  // 节点 ACL 仍需显式放行 delegate_cancel（deny-by-default，角色只做收窄）。
+  'delegate_cancel',
   'host_session_create',
   'host_session_prompt',
   'pc_action',

@@ -1,6 +1,6 @@
 {
   "name": "dsh-mesh-autostart",
-  "version": "0.0.3",
+  "version": "0.0.4",
   "description": "DSH host plugin: supervise a dsh-mesh server (and optional frpc) inside the DSH engine process so it survives engine restarts. Designed for phone/desktop DSH apps.",
   "type": "module",
   "main": "lib/index.js",

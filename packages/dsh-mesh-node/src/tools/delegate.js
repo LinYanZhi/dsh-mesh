@@ -557,10 +557,14 @@ export function buildDelegate(ctx) {
       title: 'Abort the running turn of a delegation task on this machine',
       description:
         'Immediately ABORT the current turn of the DSH session that owns a delegation task — no injected message, no waiting for the turn to finish. Only tasks registered on THIS node (a request.json under <fsRoot>/.mesh/tasks/<taskId>/) can be cancelled; an arbitrary sessionId is not accepted, so ordinary/business conversations cannot be stopped through this route. Marks status.json state=cancelled (result.json is kept untouched). Requires dsh-mesh-host >= 0.5.0 on this node: an older bridge answers 404 unknown endpoint and the call fails with E_HOST_NO_CANCEL — there is no silent fallback to archive/channel_wake.',
-      inputSchema: z.object({
-        taskId: z.string().min(1).describe('Task id of a delegation task registered on this node (returned by delegate).'),
-        reason: z.string().max(2000).optional().describe('Why it is cancelled; recorded in status.json.')
-      }),
+      inputSchema: z
+        .object({
+          taskId: z.string().min(1).describe('Task id of a delegation task registered on this node (returned by delegate).'),
+          reason: z.string().max(2000).optional().describe('Why it is cancelled; recorded in status.json.')
+        })
+        // Reject an attempt to name a session instead of a task outright: only the
+        // request.json registration may select the session to abort.
+        .strict(),
       handler: async ({ taskId, reason = '' }) => {
         try {
           const config = ctx.getConfig()

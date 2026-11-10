@@ -1,6 +1,6 @@
 {
   "name": "dsh-mesh-host",
-  "version": "0.0.3",
+  "version": "0.0.4",
   "description": "DSH host-side bridge for dsh-mesh: exposes in-process sessions/agents/tools over loopback HTTP so a mesh server can create sessions, prompt, wake them and call host tools.",
   "type": "module",
   "main": "lib/index.js",

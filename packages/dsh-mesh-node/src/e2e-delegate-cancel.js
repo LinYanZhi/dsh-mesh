@@ -235,13 +235,23 @@ async function main() {
       assert(readTask(home, 'T-GONE', 'status.json').state === 'working', 'gone-session failure must not mark the task cancelled')
     })
 
-    await check('caller-supplied sessionId is ignored: only the registered one is cancelled', async () => {
+    await check('a caller-supplied sessionId is rejected and no session is cancelled (bad sample)', async () => {
       writeTask(home, { taskId: 'T-ARB', sessionId: 'sess-registered' })
       live.reset()
-      const data = parsed(await client.callTool({ name: 'delegate_cancel', arguments: { taskId: 'T-ARB', sessionId: 'sess-business' } }))
-      assert(data.ok === true, `expected ok, got ${JSON.stringify(data)}`)
+      const raw = await client.callTool({ name: 'delegate_cancel', arguments: { taskId: 'T-ARB', sessionId: 'sess-business' } })
+      assert(raw.isError === true, `expected an argument error, got ${JSON.stringify(raw)}`)
+      const text = raw.content?.[0]?.text || ''
+      assert(/sessionId|invalid|unrecognized/i.test(text), `error should name the rejected argument: ${text}`)
+      assert(live.calls.length === 0, 'a rejected argument must not reach the bridge')
+      assert(readTask(home, 'T-ARB', 'status.json').state === 'working', 'rejected call must not mark the task cancelled')
+    })
+
+    await check('the registered session (not a caller-named one) is the one cancelled', async () => {
+      live.reset()
+      const data = parsed(await client.callTool({ name: 'delegate_cancel', arguments: { taskId: 'T-ARB' } }))
+      assert(data.ok === true && data.sessionId === 'sess-registered', `unexpected result ${JSON.stringify(data)}`)
       const cancelCalls = live.calls.filter((call) => call.path === '/host/sessions/cancel')
-      assert(cancelCalls.length === 1 && cancelCalls[0].payload.sessionId === 'sess-registered', `must cancel the registered session, got ${JSON.stringify(cancelCalls)}`)
+      assert(cancelCalls.length === 1 && cancelCalls[0].payload.sessionId === 'sess-registered', `wrong session cancelled: ${JSON.stringify(cancelCalls)}`)
     })
 
     await check('delegate_cancel is denied when the node ACL does not allow it (bad sample)', async () => {
