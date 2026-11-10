@@ -281,6 +281,39 @@ export function apply(ctx) {
     }
   }
 
+  // 只读联邦拓扑：向每个直连 peer 查询它的 cluster_status，得到 1 跳间接节点。
+  const federatedCache = { at: 0, data: null }
+  const federatedRoute = readonlyRoute('/api/dsh-mesh/federated', async () => {
+    if (federatedCache.data && Date.now() - federatedCache.at < 45_000) return federatedCache.data
+    const listResult = await runCli(['peer', 'list'])
+    let direct = []
+    try { direct = JSON.parse(listResult.stdout).peers || [] } catch { /* ignore */ }
+    const directNames = new Set(direct.map((p) => String(p.name || '')).filter(Boolean))
+    const nodes = []
+    const errors = []
+    const results = await Promise.all(direct.slice(0, 6).map(async (peer) => {
+      const name = String(peer.name || '')
+      if (!name) return null
+      const r = await runCli(['peer', 'call', 'cluster_status', '--to', name, '--args', JSON.stringify({ noPeers: true, probeSelf: false }), '--timeout-ms', '10000'], 16_000)
+      if (r.error) { errors.push({ via: name, error: r.error }); return null }
+      try {
+        const wrapper = JSON.parse(r.stdout)
+        const inner = JSON.parse(wrapper?.result?.content?.[0]?.text || '{}')
+        return { via: name, peers: inner.peers || [], instances: inner.remoteInstances || [] }
+      } catch (error) { errors.push({ via: name, error: 'invalid cluster_status' }); return null }
+    }))
+    for (const result of results.filter(Boolean)) {
+      for (const peer of result.peers) {
+        const name = String(peer.name || '')
+        if (!name || directNames.has(name)) continue
+        nodes.push({ name, via: result.via, up: Boolean(peer.up), latencyMs: peer.latencyMs ?? null, version: peer.version || null, node: peer.node || name })
+      }
+    }
+    const data = { ok: true, nodes: nodes.slice(0, 40), errors }
+    federatedCache.at = Date.now(); federatedCache.data = data
+    return data
+  })
+
   const delegateRoutes = [
     readonlyRoute('/api/dsh-mesh/delegations', async (url) => {
       // 缓存整份列表（与请求的 limit 无关），避免不同 limit 的请求互相污染缓存
@@ -310,7 +343,7 @@ export function apply(ctx) {
 
   ctx.effect(() => {
     const disposeRoute = ctx.webServer.register(route)
-    const disposeLanRoutes = [lanScanRoute, lanCodeRoute, lanCheckRoute, lanPairRoute].map((item) => ctx.webServer.register(item))
+    const disposeLanRoutes = [lanScanRoute, lanCodeRoute, lanCheckRoute, lanPairRoute, federatedRoute].map((item) => ctx.webServer.register(item))
     const disposeRoutes = delegateRoutes.map((item) => ctx.webServer.register(item))
     return () => {
       try {

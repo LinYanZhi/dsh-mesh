@@ -721,7 +721,7 @@ body.light .dm-edge-label { stroke: rgba(255,255,255,.92); }
           h('div', { className: 'dm-world-outer', style: { transform: 'translate(' + view.x + 'px,' + view.y + 'px)' } },
             h('div', { className: 'dm-world', style: Object.assign({ width: effLayout.W + 'px', height: effLayout.H + 'px' },
               SUPPORTS_ZOOM ? { zoom: view.scale } : { transform: 'scale(' + view.scale + ')' }) },
-              h(Topology, { data: props.data, layout: effLayout, selectedKey: props.selectedKey, onSelect: props.onSelect, scale: view.scale, onNodeMove: moveNode, onDragEdge: autoPanAt, onCardSize: onCardSize, show: showFilters, onInfraBounds: onInfraBounds, resetNonce: resetNonce })
+              h(Topology, { data: props.data, layout: effLayout, selectedKey: props.selectedKey, onSelect: props.onSelect, scale: view.scale, onNodeMove: moveNode, onDragEdge: autoPanAt, onCardSize: onCardSize, show: showFilters, federated: props.federated, onInfraBounds: onInfraBounds, resetNonce: resetNonce })
             )
           ),
           h('div', { className: 'dm-zoom' },
@@ -1239,6 +1239,25 @@ function deviceLinkState(data, peer, lanMap) {
     if (sakuraVisible && n.sakuraTunnel) svgEls = svgEls.concat(curve('sak' + i, pa, sakuraPos, n.sakuraUp === true, TRANSPORTS.sakura, maskText(n.sakuraTunnel.addr || ''), sizeN, sakuraSize, edgeRelated(n.key, 'server-sakura')))
     if (show.lan && n.lanUp) { var lt = n.lanTunnel || {}; var lanAddr = (lt.ip || lt.host || 'LAN') + (lt.port ? ':' + lt.port : ''); svgEls = svgEls.concat(curve('lan' + i, layout.positions[localNodeIdx], pa, n.lanUp, TRANSPORTS.lan, lanAddr, sizeOf('local'), sizeN, edgeRelated('local', n.key))) }
   })
+  var fedItems = []
+  try {
+    var directKeys = {}
+    nodes.forEach(function (n) { directKeys[peerDeviceKey(n.devKey)] = true; directKeys[peerDeviceKey(n.name)] = true })
+    var fedRaw = (props.federated && props.federated.nodes) || []
+    fedRaw.forEach(function (item) {
+      var dn = peerDeviceKey(item.name)
+      if (!dn || directKeys[dn] || dn === peerDeviceKey(data.nodeName)) return
+      var gi = -1
+      for (var ni = 0; ni < nodes.length; ni++) if (peerDeviceKey(nodes[ni].devKey) === peerDeviceKey(item.via)) { gi = ni; break }
+      if (gi < 0) return
+      var gp = layout.positions[gi]
+      var idx = fedItems.length
+      fedItems.push({ item: item, x: gp[0] + (idx % 3 - 1) * 170, y: gp[1] + 150 + Math.floor(idx / 3) * 92, gx: gp[0], gy: gp[1] })
+    })
+  } catch (error) { fedItems = [] }
+  fedItems.forEach(function (fed) {
+    svgEls.push(h('line', { key: 'fed-edge-' + fed.item.name + '-' + fed.item.via, x1: fed.gx, y1: fed.gy, x2: fed.x, y2: fed.y, className: 'dm-edge-indirect', strokeDasharray: '4 4' }))
+  })
   return h('div', null,
     h('svg', { className: 'dm-lines', width: layout.W, height: layout.H, viewBox: '0 0 ' + layout.W + ' ' + layout.H }, svgEls),
     nodes.map(function (node, i) {
@@ -1270,6 +1289,16 @@ function deviceLinkState(data, peer, lanMap) {
             return h('span', { key: pi, className: 'dm-chip' + (item.up ? ' run' : ' bad'), title: (item.up ? '在线' : '离线') }, String(item.port))
           })
         )
+      )
+    }),
+    fedItems.map(function (fed) {
+      var item = fed.item
+      return h('div', { key: 'fed:' + item.via + ':' + item.name, className: 'dm-card-node indirect', style: { left: fed.x + 'px', top: fed.y + 'px', width: '172px', transform: 'translate(-50%,-50%)' }, title: '间接可达：经 ' + item.via },
+        h('div', { className: 'dm-n-head' },
+          h('div', { className: 'dm-n-name' }, h('span', { className: 'dm-dot ' + (item.up ? 'ok' : 'bad') }), h('span', { className: 'dm-ell' }, item.name)),
+          h('span', { className: 'dm-fed-badge' }, '经 ' + item.via)
+        ),
+        h('div', { className: 'dm-card-dsh' }, h('span', { className: 'dm-chip' }, item.up ? (item.latencyMs != null ? item.latencyMs + 'ms' : '可达') : '不可达'))
       )
     }),
     (publicVisible ? h('div', {
@@ -1620,6 +1649,8 @@ function deviceLinkState(data, peer, lanMap) {
     function MeshStatusSection() {
       var s0 = useState(null); var data = s0[0]; var setData = s0[1]
       var s1 = useState(true); var loading = s1[0]; var setLoading = s1[1]
+      var sFed = useState(null); var federated = sFed[0]; var setFederated = sFed[1]
+      var federatedRef = useRef({ at: 0 })
       var s2 = useState(''); var error = s2[0]; var setError = s2[1]
       var s3 = useState(0); var tick = s3[0]; var setTick = s3[1]
       var s4 = useState(''); var copied = s4[0]; var setCopied = s4[1]
@@ -1733,6 +1764,13 @@ function deviceLinkState(data, peer, lanMap) {
 
       useEffect(function () { if (tick > 0 && !forceRef.current.busy) load(false) }, [tick])
       useEffect(function () {
+        if (!data) return
+        var now = Date.now()
+        if (now - federatedRef.current.at < 60000) return
+        federatedRef.current.at = now
+        fetch('/api/dsh-mesh/federated').then(function (r) { return r.text() }).then(function (text) { try { setFederated(JSON.parse(text)) } catch (error) {} }).catch(function () {})
+      }, [data])
+      useEffect(function () {
         var raw = String((data && data.verdict) || '')
         if (!raw) return
         var st = verdictRef.current
@@ -1800,7 +1838,7 @@ function deviceLinkState(data, peer, lanMap) {
 
         h('div', { className: 'dm-body', style: splitW > 0 ? { '--dm-main-w': splitW + 'px' } : undefined },
           h('div', { className: 'dm-pane' },
-            h(Viewport, { data: data, layout: computeLayout(1 + filterSelfPeers(dedupePeers(data.peers || []), data.nodeName).length), selectedKey: selectedKey, onSelect: setSelectedKey }),
+            h(Viewport, { data: data, federated: federated, layout: computeLayout(1 + filterSelfPeers(dedupePeers(data.peers || []), data.nodeName).length), selectedKey: selectedKey, onSelect: setSelectedKey }),
             h(InfraPanels, { data: data }),
             h(DeviceDetails, { data: data, selectedKey: selectedKey })
           ),
@@ -2532,6 +2570,9 @@ body[data-ds-dark-theme] .dm-dg-fs-item.active { background:rgba(88,166,255,.28)
 .dm-lan-code { font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:12px; padding:6px 8px; border-radius:8px; background:rgba(88,166,255,.1); border:1px solid rgba(88,166,255,.35); word-break:break-all; }
 .dm-toggle { display:inline-flex; align-items:center; gap:5px; font-size:11.5px; opacity:.8; cursor:pointer; user-select:none; white-space:nowrap; }
 .dm-toggle input { margin:0; }
+.dm-card-node.indirect { opacity:.62; border-style:dashed; border-color:rgba(128,128,128,.45); background:rgba(128,128,128,.03); }
+.dm-fed-badge { font-size:10px; opacity:.6; padding:1px 5px; border:1px dashed rgba(128,128,128,.5); border-radius:999px; white-space:nowrap; }
+.dm-edge-indirect { stroke:rgba(128,128,128,.5); stroke-width:1.1; fill:none; }
 
 .dm-pane { min-width:0; display:flex; flex-direction:column; gap:12px; }
 .dm-divider { cursor:col-resize; align-self:stretch; min-height:120px; border-radius:4px; position:relative; }
