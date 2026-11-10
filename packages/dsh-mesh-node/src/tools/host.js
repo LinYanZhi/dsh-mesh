@@ -12,7 +12,7 @@ const instanceSchema = z
   )
 
 function hostClient(ctx, instance) {
-  return createHostClient({ config: ctx.getConfig(), home: ctx.home, log: ctx.log, instance })
+  return createHostClient({ config: ctx.getConfig(), home: ctx.home, log: ctx.log, instance, peerId: ctx.peerId })
 }
 
 /**

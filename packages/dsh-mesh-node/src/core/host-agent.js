@@ -145,8 +145,12 @@ function requestJson({ url, token, method = 'GET', path, body, timeoutMs = 12000
  * Build a host-bridge client bound to one config/home pair and one instance.
  * @param {{config: object, home: string, log?: object, instance?: string}} options
  */
-export function createHostClient({ config, home, log = console, instance }) {
+export function createHostClient({ config, home, log = console, instance, peerId } = {}) {
   const entry = resolveHostInstance(config, instance)
+  const allowedPeers = Array.isArray(entry.allowedPeers) ? entry.allowedPeers : null
+  if (allowedPeers && allowedPeers.length && peerId && !allowedPeers.includes('*') && !allowedPeers.includes(peerId)) {
+    throw new HostError('E_HOST_FORBIDDEN', `peer ${peerId} is not allowed to use host instance ${entry.id}`, { instance: entry.id })
+  }
   const base = {
     id: entry.id,
     label: entry.label || entry.id,

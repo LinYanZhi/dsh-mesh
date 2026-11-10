@@ -62,6 +62,7 @@ node src/cli.js peer import --file <name>.yml        import a mesh-peer overlay 
   node src/cli.js host tools [--search TEXT] [--instance ID]
                                                       list tools registered inside that DSH instance
   node src/cli.js host agents [--instance ID]         list live sessions of that DSH instance
+  node src/cli.js host acl <instance> [--allow id1,id2 | --clear]  restrict which peer token may use this instance
   node src/cli.js host call <tool> [--args JSON | --args-file PATH] [--session ID] [--instance ID]
                                                       call a tool inside that DSH instance (PowerShell drops
                                                       embedded quotes from native args: prefer --args-file there)
@@ -853,6 +854,21 @@ async function main(argv) {
         )
       }
       return entry
+    }
+
+    if (sub === 'acl') {
+      const id = argv[2] || instanceArg
+      if (!id) { console.error('usage: node src/cli.js host acl <instance> [--allow peerId1,peerId2 | --clear]'); return 1 }
+      const entry = (config.hosts || []).find((item) => item.id === id)
+      if (!entry) { console.error('unknown host instance "' + id + '"'); return 1 }
+      const allow = argValue(argv, '--allow', undefined)
+      if (allow === undefined && !argv.includes('--clear')) { console.error('usage: node src/cli.js host acl <instance> [--allow peerId1,peerId2 | --clear]'); return 1 }
+      const bak = configPath(home) + '.bak-hostacl-' + Date.now()
+      try { copyFileSync(configPath(home), bak) } catch { /* first run */ }
+      entry.allowedPeers = argv.includes('--clear') ? [] : String(allow).split(',').map((s) => s.trim()).filter(Boolean)
+      saveConfig(config, home)
+      console.log(JSON.stringify({ ok: true, instance: id, allowedPeers: entry.allowedPeers, backup: bak }, null, 2))
+      return 0
     }
 
     if (sub === 'install') {
