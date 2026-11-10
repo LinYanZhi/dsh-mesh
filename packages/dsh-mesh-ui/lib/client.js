@@ -1286,10 +1286,12 @@ function deviceLinkState(data, peer, lanMap) {
         ),
         node.up ? null : h('div', { className: 'dm-offline-row' }, '全部链路不可用' + (node.error ? ' · ' + node.error : '')),
         h('div', { className: 'dm-card-dsh' },
-          types.map(function (tp, ti) { return h('span', { key: 't' + ti, className: 'dm-chip type' }, tp) }),
-          (node.ports || []).map(function (item, pi) {
-            return h('span', { key: pi, className: 'dm-chip' + (item.up ? ' run' : ' bad'), title: (item.up ? '在线' : '离线') }, String(item.port))
-          })
+          (node.ports || []).length
+            ? (node.ports || []).map(function (item, pi) {
+              var typeName = types[pi] || types[types.length - 1] || 'DSH'
+              return h('span', { key: pi, className: 'dm-chip type' + (item.up ? ' run' : ' bad'), title: (item.up ? '在线' : '离线') + ' · ' + typeName + ' 端口 ' + item.port }, typeName + ':' + item.port)
+            })
+            : types.map(function (tp, ti) { return h('span', { key: 't' + ti, className: 'dm-chip type' }, tp) })
         )
       )
     }),
