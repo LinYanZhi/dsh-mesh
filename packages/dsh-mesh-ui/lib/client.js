@@ -642,6 +642,12 @@ body.light .dm-edge-label { stroke: rgba(255,255,255,.92); }
         return function () { try { ro.disconnect() } catch (_) { /* ignore */ } }
       }, [fit])
 
+      // 2026-11-10：筛选变化后按可见内容重新 fit；去掉的服务器不应继续占布局/留白
+      useEffect(function () {
+        interactedRef.current = false
+        setTimeout(fit, 30)
+      }, [showFilters.lan, showFilters.public, showFilters.sakura])
+
       // 2026-11-10：布局变化（节点数/卡片尺寸）后自动 fit（用户未手动缩放/平移时），避免停留在旧的缩放比例
       useEffect(function () {
         if (!interactedRef.current) setTimeout(fit, 40)
@@ -970,7 +976,7 @@ function deviceLinkState(data, peer, lanMap) {
             h('span', null, '第三方 frps 穿透'),
             h('span', { className: 'dm-sub', style: { marginLeft: 'auto' } }, acc.online + '/' + acc.total + ' 在线')
           ),
-          h('div', { className: 'dm-sub dm-mono', style: { marginBottom: 4 } }, '公网地址已隐藏'),
+          h('div', { className: 'dm-sub dm-mono', style: { marginBottom: 4 } }, acc && acc.tunnels && acc.tunnels[0] ? maskText(acc.tunnels[0].addr || '') : '未配置'),
           tunnelRows
         ) : null
       )
@@ -1122,8 +1128,8 @@ function deviceLinkState(data, peer, lanMap) {
   var sakuraVisible = show.sakura && Boolean(sakuraAcc && (sakuraAcc.tunnels || []).length)
   var aliyunPorts = peers.map(function (p) { return isLanPeer(p) ? null : (p.tunnel || {}).port }).filter(Boolean)
   var infra = [
-    { key: 'server-aliyun', transport: 'public', name: '公网中转', host: '公网地址已隐藏', color: TRANSPORTS.public.color, detail: '隧道 ' + (aliyunPorts.length ? aliyunPorts.sort().join('/') : '—'), up: Boolean(localPub) || hasPublic },
-    { key: 'server-sakura', transport: 'sakura', name: '第三方 frps 穿透', host: '公网地址已隐藏', color: TRANSPORTS.sakura.color, detail: sakuraAcc ? (sakuraAcc.online + '/' + sakuraAcc.total + ' 在线') : '未采集', up: Boolean(sakuraAcc) },
+    { key: 'server-aliyun', transport: 'public', name: '公网中转', host: localPub ? maskHost(localPub.host) : '未配置', color: TRANSPORTS.public.color, detail: '隧道 ' + (aliyunPorts.length ? aliyunPorts.sort().join('/') : '—'), up: Boolean(localPub) || hasPublic },
+    { key: 'server-sakura', transport: 'sakura', name: '第三方 frps 穿透', host: sakuraAcc && sakuraAcc.tunnels && sakuraAcc.tunnels[0] ? maskText(sakuraAcc.tunnels[0].addr || '') : '未配置', color: TRANSPORTS.sakura.color, detail: sakuraAcc ? (sakuraAcc.online + '/' + sakuraAcc.total + ' 在线') : '未采集', up: Boolean(sakuraAcc) },
   ]
   // 2026-11-09-v8：服务器默认位置贴住扇形最高一排设备（用户要求缩小服务器↔设备的垂直间隔）
   function infraDefaultPos(idx) {
@@ -1283,7 +1289,8 @@ function deviceLinkState(data, peer, lanMap) {
         node.up ? null : h('div', { className: 'dm-offline-row' }, '全部链路不可用' + (node.error ? ' · ' + node.error : '')),
         h('div', { className: 'dm-card-dsh' },
           (node.ports || []).map(function (item, pi) {
-            return h('span', { key: pi, className: 'dm-chip type' + (item.up ? ' run' : ' bad'), title: (item.up ? '在线' : '离线') + ' · DSH 端口 ' + item.port }, String(item.port))
+            var portUp = item.up == null ? node.up : Boolean(item.up)
+            return h('span', { key: pi, className: 'dm-chip type' + (portUp ? ' run' : ' bad'), title: (portUp ? '实例在线' : '实例离线') + ' · DSH 端口 ' + item.port }, String(item.port))
           })
         )
       )
