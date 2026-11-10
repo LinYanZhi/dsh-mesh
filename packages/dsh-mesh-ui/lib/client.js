@@ -1094,7 +1094,7 @@ function deviceLinkState(data, peer, lanMap) {
     up: true,
     name: nodeDisplay(data.nodeName),
     dsh: localUp + '/' + instances.length,
-    ports: instances.map(function (inst) { return { port: inst.port, up: inst.up } }),
+    ports: instances.map(function (inst) { return { port: inst.port, up: inst.up, error: inst.error || '' } }),
     extra: ''
   }].concat(peers.map(function (peer) {
     var ls = deviceLinkState(data, peer, lanMap)
@@ -1290,7 +1290,7 @@ function deviceLinkState(data, peer, lanMap) {
         h('div', { className: 'dm-card-dsh' },
           (node.ports || []).map(function (item, pi) {
             var portUp = item.up == null ? node.up : Boolean(item.up)
-            return h('span', { key: pi, className: 'dm-chip type' + (portUp ? ' run' : ' bad'), title: (portUp ? '实例在线' : '实例离线') + ' · DSH 端口 ' + item.port }, String(item.port))
+            return h('span', { key: pi, className: 'dm-chip type' + (portUp ? ' run' : ' bad'), title: (portUp ? '实例在线' : (item.error ? 'host bridge 不可达：' + item.error : '实例离线 / host bridge 未连接')) + ' · DSH 端口 ' + item.port }, String(item.port))
           })
         )
       )
