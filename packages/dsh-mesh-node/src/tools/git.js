@@ -2,8 +2,9 @@ import { existsSync, readdirSync, realpathSync } from 'node:fs'
 import { basename, join, resolve } from 'node:path'
 import { z } from 'zod'
 import { isInsideRoots } from '../core/config.js'
-import { clip, run } from '../core/util.js'
-import { denied, invalidArg, notFound, ok } from '../core/result.js'
+import { gitBinary, gitSpawnDiagnostics, runGit } from '../core/git-exec.js'
+import { clip } from '../core/util.js'
+import { denied, fail, invalidArg, notFound, ok } from '../core/result.js'
 
 function guard(path, config) {
   const abs = resolve(path)
@@ -14,10 +15,53 @@ function guard(path, config) {
   return { abs }
 }
 
+// git 可执行文件解析/执行与 spawn 诊断都在 src/core/git-exec.js（cluster.js 共用同一套回退）。
+// [why] 2026-11-10：peer-node 的 mesh server 由没设 PATH 的启动脚本拉起，spawn git 直接 ENOENT，
+//   旧代码把 top.error 一律吞成「不是仓库」，把真因藏了。现在 spawn 失败如实报 E_GIT_SPAWN。
+function gitFailureResult(failure, extra = {}) {
+  return fail(failure.code, failure.message, { ...failure.extra, ...extra })
+}
+
 async function repoRootOf(abs, { timeout, signal } = {}) {
-  const top = await run('git', ['-C', abs, 'rev-parse', '--show-toplevel'], { timeout, signal })
-  if (top.error || !top.stdout.trim()) return { error: top }
+  const top = await runGit(['-C', abs, 'rev-parse', '--show-toplevel'], { timeout, signal })
+  if (top.error) {
+    const spawnCode = top.error.code
+    // spawn 失败时 error.code 是字符串（ENOENT/EACCES…）；进程正常退出（不是仓库）时是数字 exit code
+    if (typeof spawnCode === 'string') {
+      const probed = (await gitBinary()).tried || []
+      return {
+        failure: {
+          code: 'E_GIT_SPAWN',
+          message: `cannot spawn git (${spawnCode}): ${top.error.message || spawnCode}`,
+          extra: { spawnCode, ...gitSpawnDiagnostics(), probed }
+        }
+      }
+    }
+    if (top.killed || top.timedOut) {
+      return {
+        failure: {
+          code: 'E_GIT_TIMEOUT',
+          message: `git rev-parse timed out after ${timeout ?? '?'}ms: git -C ${abs} rev-parse --show-toplevel`,
+          extra: { timeoutMs: timeout ?? null }
+        }
+      }
+    }
+    const stderr = String(top.stderr || '').trim()
+    if (top.code === 128 && /not a git repository/i.test(stderr)) {
+      return { failure: { code: 'E_INVALID_ARG', message: `not a git repository: ${abs}`, extra: { exitCode: top.code, stderr: stderr.slice(0, 500) } } }
+    }
+    return {
+      failure: {
+        code: 'E_GIT_EXIT',
+        message: `git rev-parse failed (exit ${top.code}): ${stderr.slice(0, 400) || 'no stderr'}`,
+        extra: { exitCode: top.code, stderr: stderr.slice(0, 500) }
+      }
+    }
+  }
   const root = top.stdout.trim()
+  if (!root) {
+    return { failure: { code: 'E_GIT_EXIT', message: `git rev-parse returned no path for ${abs} (exit ${top.code})`, extra: { exitCode: top.code } } }
+  }
   try {
     return { root: realpathSync(root) }
   } catch {
@@ -44,18 +88,18 @@ function countDirty(entries) {
 
 async function repoSummary(abs, { timeout, signal, entries = 200 } = {}) {
   const found = await repoRootOf(abs, { timeout, signal })
-  if (found.error) return null
+  if (found.failure) return { failure: found.failure }
   const root = found.root
   const [branch, head, upstream, status] = await Promise.all([
-    run('git', ['-C', root, 'rev-parse', '--abbrev-ref', 'HEAD'], { timeout, signal }),
-    run('git', ['-C', root, 'rev-parse', 'HEAD'], { timeout, signal }),
-    run('git', ['-C', root, 'rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}'], { timeout, signal }),
-    run('git', ['-C', root, 'status', '--porcelain=v1', '-b', '--untracked-files=normal'], { timeout, signal })
+    runGit(['-C', root, 'rev-parse', '--abbrev-ref', 'HEAD'], { timeout, signal }),
+    runGit(['-C', root, 'rev-parse', 'HEAD'], { timeout, signal }),
+    runGit(['-C', root, 'rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}'], { timeout, signal }),
+    runGit(['-C', root, 'status', '--porcelain=v1', '-b', '--untracked-files=normal'], { timeout, signal })
   ])
   let ahead = null
   let behind = null
   if (!upstream.error) {
-    const counts = await run('git', ['-C', root, 'rev-list', '--left-right', '--count', '@{u}...HEAD'], {
+    const counts = await runGit(['-C', root, 'rev-list', '--left-right', '--count', '@{u}...HEAD'], {
       timeout,
       signal
     })
@@ -69,17 +113,19 @@ async function repoSummary(abs, { timeout, signal, entries = 200 } = {}) {
   const branchLine = lines.find((l) => l.startsWith('## ')) || ''
   const statusEntries = lines.filter((l) => !l.startsWith('## '))
   return {
-    root,
-    name: basename(root),
-    branch: branch.error ? null : branch.stdout.trim(),
-    head: head.error ? null : head.stdout.trim(),
-    upstream: upstream.error ? null : upstream.stdout.trim(),
-    ahead,
-    behind,
-    statusBranchLine: branchLine,
-    dirty: countDirty(statusEntries),
-    entries: statusEntries.slice(0, entries),
-    truncatedEntries: Math.max(0, statusEntries.length - entries)
+    summary: {
+      root,
+      name: basename(root),
+      branch: branch.error ? null : branch.stdout.trim(),
+      head: head.error ? null : head.stdout.trim(),
+      upstream: upstream.error ? null : upstream.stdout.trim(),
+      ahead,
+      behind,
+      statusBranchLine: branchLine,
+      dirty: countDirty(statusEntries),
+      entries: statusEntries.slice(0, entries),
+      truncatedEntries: Math.max(0, statusEntries.length - entries)
+    }
   }
 }
 
@@ -124,8 +170,8 @@ export function buildGit(ctx) {
         const g = guard(path, config)
         if (g.error) return g.error
         const timeout = config.limits?.gitTimeoutMs ?? 20000
-        const summary = await repoSummary(g.abs, { timeout, signal })
-        if (!summary) return invalidArg(`not a git repository: ${g.abs}`)
+        const { summary, failure } = await repoSummary(g.abs, { timeout, signal })
+        if (failure) return gitFailureResult(failure, { path: g.abs })
         return ok(summary)
       }
     },
@@ -146,13 +192,13 @@ export function buildGit(ctx) {
         if (g.error) return g.error
         const timeout = config.limits?.gitTimeoutMs ?? 20000
         const found = await repoRootOf(g.abs, { timeout, signal })
-        if (found.error) return invalidArg(`not a git repository: ${g.abs}`)
+        if (found.failure) return gitFailureResult(found.failure, { path: g.abs })
         const n = Math.min(limit ?? 20, 200)
         const args = ['-C', found.root, 'log', `-n${n}`]
         if (format === 'detail') args.push('--date=iso-strict', '--pretty=format:%H%x09%h%x09%an%x09%aI%x09%s')
         else args.push('--date=short', '--pretty=format:%h%x09%ad%x09%s')
         if (ref) args.push(ref, '--')
-        const out = await run('git', args, { timeout, signal })
+        const out = await runGit(args, { timeout, signal })
         if (out.error) return invalidArg(`git log failed: ${out.stderr.trim().slice(0, 500)}`)
         const commits = out.stdout
           .split(/\r?\n/)
@@ -184,13 +230,13 @@ export function buildGit(ctx) {
         if (g.error) return g.error
         const timeout = config.limits?.gitTimeoutMs ?? 20000
         const found = await repoRootOf(g.abs, { timeout, signal })
-        if (found.error) return invalidArg(`not a git repository: ${g.abs}`)
+        if (found.failure) return gitFailureResult(found.failure, { path: g.abs })
         const base = ['-C', found.root, 'diff']
         if (staged) base.push('--staged')
         if (ref) base.push(ref)
         const pathspec = file ? ['--', file] : []
-        const statOut = await run('git', [...base, '--stat', ...pathspec], { timeout, signal })
-        const diffOut = await run('git', [...base, ...pathspec], { timeout, signal })
+        const statOut = await runGit([...base, '--stat', ...pathspec], { timeout, signal })
+        const diffOut = await runGit([...base, ...pathspec], { timeout, signal })
         if (diffOut.error && diffOut.code !== 1) {
           return invalidArg(`git diff failed: ${diffOut.stderr.trim().slice(0, 500)}`)
         }
@@ -233,13 +279,17 @@ export function buildGit(ctx) {
           targets.push(...findRepos(abs, { depth: depth ?? 2, maxRepos: cap - targets.length }))
         }
         const repos = []
+        const errors = []
         let index = 0
         const worker = async () => {
           while (index < targets.length) {
             const dir = targets[index]
             index += 1
-            const summary = await repoSummary(dir, { timeout, signal, entries: 20 })
-            if (!summary) continue
+            const { summary, failure } = await repoSummary(dir, { timeout, signal, entries: 20 })
+            if (failure) {
+              errors.push({ path: dir, code: failure.code, message: failure.message, ...failure.extra })
+              continue
+            }
             const dirtyCount =
               summary.dirty.staged + summary.dirty.modified + summary.dirty.untracked + summary.dirty.unmerged
             if (dirtyOnly && dirtyCount === 0 && !(summary.ahead > 0)) continue
@@ -248,6 +298,10 @@ export function buildGit(ctx) {
         }
         await Promise.all(Array.from({ length: Math.min(4, targets.length) }, worker))
         repos.sort((a, b) => a.root.localeCompare(b.root))
+        // 全部候选都失败时把真因抛出来（2026-11-10 的坑：repo_scan 只回 scanned 1/repos 0，看不出是 git spawn 失败）
+        if (targets.length > 0 && repos.length === 0 && errors.length === targets.length) {
+          return gitFailureResult(errors[0], { scanned: targets.length, errors })
+        }
         const dirty = repos.filter(
           (r) => r.dirty.staged + r.dirty.modified + r.dirty.untracked + r.dirty.unmerged > 0 || r.ahead > 0
         )
@@ -258,6 +312,7 @@ export function buildGit(ctx) {
           repos: repos.length,
           dirtyRepos: dirty.length,
           dirtyOnly: Boolean(dirtyOnly),
+          ...(errors.length ? { errors } : {}),
           items: repos
         })
       }

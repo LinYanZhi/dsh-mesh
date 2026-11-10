@@ -16,6 +16,7 @@
 import { execFile } from 'node:child_process'
 import { existsSync, readdirSync, readFileSync, statfsSync, writeFileSync } from 'node:fs'
 import { lookup as dnsLookup } from 'node:dns/promises'
+import { connect as netConnect } from 'node:net'
 import { arch as osArch, cpus as osCpus, freemem as osFreemem, homedir, platform as osPlatform, release as osRelease, totalmem as osTotalmem } from 'node:os'
 import { join } from 'node:path'
 
@@ -504,6 +505,36 @@ export async function collect(repo) {
       if (resolved && resolved.address) tunnel.ip = resolved.address
     } catch { /* 解析失败则保持主机名 */ }
   }))
+
+  // 2026-11-10：为每条 peer 隧道做 TCP 端口探测（阿里云 701x / LAN 8124），面板连线状态以此为准，
+  // 而不是用 peer.up（HTTP /health 探测，高延迟节点偶发超时会造成"隧道通却显示断连"的误判）
+  function tcpProbe(host, port, timeoutMs) {
+    return new Promise((resolve) => {
+      const started = Date.now()
+      let done = false
+      const socket = netConnect({ host, port })
+      const finish = (up, error) => {
+        if (done) return
+        done = true
+        try { socket.destroy() } catch { /* ignore */ }
+        resolve({ up, latencyMs: Date.now() - started, error: up ? null : error || "timeout" })
+      }
+      socket.setTimeout(timeoutMs)
+      socket.once("connect", () => finish(true, null))
+      socket.once("timeout", () => finish(false, "timeout"))
+      socket.once("error", (err) => finish(false, err?.code || "error"))
+    })
+  }
+  await Promise.all(peers.map(async (peer) => {
+    const tunnel = peer.tunnel || {}
+    if (!tunnel.host || !tunnel.port) return
+    tunnel.probe = await tcpProbe(tunnel.host, Number(tunnel.port), 3000)
+    if (!tunnel.probe.up) {
+      const retry = await tcpProbe(tunnel.host, Number(tunnel.port), 3000)
+      if (retry.up) tunnel.probe = retry
+    }
+  }))
+
 
   return {
     ok: true,

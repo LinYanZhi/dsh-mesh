@@ -42,7 +42,7 @@ window.__ModuleLoader__.load({
       var type = deviceType(name)
       return type ? label + ' · ' + type : label
     }
-      // 同一台设备可能有多个 peer 记录（不同 token/入口：phone-node / phone-node-lan / phone-node-exec）。
+      // 同一台设备可能有多个 peer 记录（不同 token/入口：peer-node / peer-node-lan / peer-node-exec）。
   // AI 网络拓扑按「设备」展示：去掉后缀归并，取可达且延迟最优的那条。
   var PEER_SUFFIX = /-(lan|wan|exec|exe|import|local|ctl)$/i
   function peerDeviceKey(name) {
@@ -96,6 +96,7 @@ function nodeLabel(name) { return NODE_LABELS[String(name || '').toLowerCase()] 
       return keys
     }
     // 2026-11-10：用户手工调整后认可的默认布局（世界坐标，10000×6000 画布内）
+    // 设备按设备名（home/peer-node/company/peer-node/peer-node）映射，各机通用；服务器两张卡单独一张表
     var DEFAULT_DEVICE_POS = {}
     var DEFAULT_INFRA_POS = {
       aliyun: [4887.59, 2856.78],
@@ -677,7 +678,7 @@ body.light .dm-edge-label { stroke: rgba(255,255,255,.92); }
             h('span', null, '⋯')
           )
         ),
-        h('div', { className: 'dm-hint' }, '拓扑 v17 · 内容 ' + Math.round(layout.W) + '×' + Math.round(layout.H) + 'px · 卡 ' + Math.round(layout.cardW) + '×' + Math.round(layout.cardH) + ' · 缩放 ' + Math.round(view.scale * 100) + '% · 滚轮缩放 / 拖拽平移')
+        h('div', { className: 'dm-hint' }, '拓扑 v19 · 内容 ' + Math.round(layout.W) + '×' + Math.round(layout.H) + 'px · 卡 ' + Math.round(layout.cardW) + '×' + Math.round(layout.cardH) + ' · 缩放 ' + Math.round(view.scale * 100) + '% · 滚轮缩放 / 拖拽平移')
       )
     }
 
@@ -811,6 +812,7 @@ var DOWN_COLOR = "rgba(209,75,65,.7)"
 // 各机 DSH 安装形态（实测/档案）
 var DEVICE_DSH = {}
 function dshTypesFor(devKey) { return DEVICE_DSH[peerDeviceKey(devKey)] || [] }
+// LAN peer 判定：-lan 后缀 / 内网 IP / kind=lan（实际数据里 peer-node-lan 的 kind 是 frp）
 function isLanPeer(peer) {
   var t = (peer && peer.tunnel) || {}
   var name = String((peer && peer.name) || '')
@@ -835,9 +837,11 @@ function sakuraTunnelOf(data, devKey) {
 function deviceLinkState(data, peer, lanMap) {
   var dk = peerDeviceKey(peer.name)
   var t = peer.tunnel || {}
-  var publicUp = Boolean(peer.up)
+  // 2026-11-10：蓝线状态以隧道端口 TCP 探测为准（HTTP /health 对高延迟节点会误判断连）
+  var probe = t.probe && typeof t.probe.up === "boolean" ? t.probe : null
+  var publicUp = (probe ? probe.up === true : false) || Boolean(peer.up)
   var lan = lanMap ? lanMap[dk] : (t.kind === 'lan' ? { up: Boolean(peer.up), host: t.host, port: t.port, ip: t.ip || '' } : null)
-  var lanUp = Boolean(lan && lan.up)
+  var lanUp = Boolean(lan && (lan.probe && lan.probe.up === true ? true : lan.up))
   var st = sakuraTunnelOf(data, dk)
   var sakuraUp = st ? st.online === true : null
   var anyUp = publicUp || sakuraUp === true || lanUp
@@ -858,7 +862,7 @@ function deviceLinkState(data, peer, lanMap) {
       var localKey = peerDeviceKey(data.nodeName)
       var devs = [{ devKey: localKey, name: nodeDisplay(data.nodeName) + "（本机）", up: true, port: localPort, host: localHost }].concat(peers.filter(function (p) { return !isLanPeer(p) }).map(function (p) {
         var tu = p.tunnel || {}
-        return { devKey: peerDeviceKey(p.name), name: nodeDisplay(peerDeviceKey(p.name)), up: Boolean(p.up), port: tu.port || null, host: tu.host || 'relay.example.com' }
+        return { devKey: peerDeviceKey(p.name), name: nodeDisplay(peerDeviceKey(p.name)), up: (tu.probe ? Boolean(tu.probe.up) : Boolean(p.up)), port: tu.port || null, host: tu.host || 'relay.example.com' }
       }))
       var aliyunRows = devs.filter(function (d) { return d.port }).map(function (d) {
         return h('div', { key: d.devKey, className: 'dm-device-row' },
@@ -997,7 +1001,7 @@ function deviceLinkState(data, peer, lanMap) {
   var lanMap = {}
   filterSelfPeers(data.peers || [], data.nodeName).forEach(function (p) {
     var t = p.tunnel || {}
-    if (isLanPeer(p)) lanMap[peerDeviceKey(p.name)] = { up: Boolean(p.up), host: t.host, port: t.port, ip: t.ip || '' }
+    if (isLanPeer(p)) lanMap[peerDeviceKey(p.name)] = { up: Boolean(p.up), host: t.host, port: t.port, ip: t.ip || '', probe: t.probe || null }
   })
   var nodes = [{
     key: 'local',
@@ -1418,17 +1422,62 @@ function deviceLinkState(data, peer, lanMap) {
       var s2 = useState(''); var error = s2[0]; var setError = s2[1]
       var s3 = useState(0); var tick = s3[0]; var setTick = s3[1]
       var s4 = useState(''); var copied = s4[0]; var setCopied = s4[1]
+      // 2026-11-10：真刷新 —— 点击后等待后台采集完成再渲染；本地冷却 + 忙锁防止连点刷爆请求
+      var s6 = useState(""); var refreshHint = s6[0]; var setRefreshHint = s6[1]
+      var forceRef = useRef({ at: 0, busy: false })
       var s5 = useState('local'); var selectedKey = s5[0]; var setSelectedKey = s5[1]
 
       function load(force) {
+        if (!force) {
+          setLoading(true)
+          fetchStatus(false)
+            .then(function (json) {
+              setData(json)
+              setError(json && json.ok === false && !json.warming ? json.error || "mesh-health error" : "")
+            })
+            .catch(function (err) { setError(String((err && err.message) || err)) })
+            .finally(function () { setLoading(false) })
+          return
+        }
+        var st = forceRef.current
+        var now = Date.now()
+        if (st.busy) return
+        if (now - st.at < 8000) {
+          var waitSec = Math.ceil((8000 - (now - st.at)) / 1000)
+          setRefreshHint("刚采集过，" + waitSec + "s 后可再刷新")
+          setTimeout(function () { setRefreshHint("") }, 2200)
+          return
+        }
+        st.busy = true
+        st.at = now
         setLoading(true)
-        fetchStatus(Boolean(force))
-          .then(function (json) {
-            setData(json)
-            setError(json && json.ok === false && !json.warming ? json.error || 'mesh-health error' : '')
+        setRefreshHint("采集中…")
+        var prevAt = data && data.at
+        var attempts = 0
+        function poll() {
+          attempts++
+          fetchStatus(false).then(function (json) {
+            var fresh = json && json.refreshing === false && json.at && json.at !== prevAt
+            if (fresh || attempts >= 15) {
+              setData(json)
+              setError(json && json.ok === false && !json.warming ? json.error || "mesh-health error" : "")
+              setLoading(false)
+              st.busy = false
+              setRefreshHint(fresh ? "已刷新" : "无新数据（采集超时）")
+              setTimeout(function () { setRefreshHint("") }, 2000)
+              return
+            }
+            setTimeout(poll, 800)
+          }).catch(function () {
+            st.busy = false
+            setLoading(false)
+            setRefreshHint("刷新失败")
+            setTimeout(function () { setRefreshHint("") }, 2500)
           })
-          .catch(function (err) { setError(String((err && err.message) || err)) })
-          .finally(function () { setLoading(false) })
+        }
+        fetchStatus(true)
+          .catch(function () { /* continue polling */ })
+          .then(function () { setTimeout(poll, 500) })
       }
 
       useEffect(function () {
@@ -1437,7 +1486,7 @@ function deviceLinkState(data, peer, lanMap) {
         return function () { clearInterval(timer) }
       }, [])
 
-      useEffect(function () { if (tick > 0) load(false) }, [tick])
+      useEffect(function () { if (tick > 0 && !forceRef.current.busy) load(false) }, [tick])
 
       function copyJson() {
         var text = JSON.stringify(data || {}, null, 2)
@@ -1468,7 +1517,8 @@ function deviceLinkState(data, peer, lanMap) {
           h('span', { style: { flex: 1 } }),
           h('a', { className: 'dm-btn', href: API, target: '_blank', rel: 'noreferrer', style: { textDecoration: 'none' } }, '原始 JSON'),
           h('button', { className: 'dm-btn', onClick: copyJson }, copied || '复制诊断'),
-          h('button', { className: 'dm-btn primary', onClick: function () { load(true) } }, loading ? '刷新中…' : '刷新')
+          h('button', { className: 'dm-btn primary', onClick: function () { load(true) }, title: '立即采集一次并等待新快照（8s 冷却）' }, loading ? '采集中…' : '刷新'),
+          refreshHint ? h('span', { className: 'dm-sub' }, refreshHint) : null
         ),
         error ? h('div', { className: 'dm-err' }, error) : null,
 

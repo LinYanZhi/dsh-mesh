@@ -1,25 +1,42 @@
 import { z } from 'zod'
 import { existsSync, readFileSync, readdirSync } from 'node:fs'
-import { execFileSync } from 'node:child_process'
 import { join } from 'node:path'
 import { loadPeers } from '../core/pairing.js'
 import { clusterReport, probePeer } from '../core/cluster.js'
 import { callPeerTool } from '../core/peer-client.js'
+import { gitSpawnDiagnostics, runGit } from '../core/git-exec.js'
+import { joinRemote } from '../core/remote-path.js'
 import { fail, ok } from '../core/result.js'
 
 const TERMINAL = new Set(['done', 'failed', 'cancelled'])
 
-function gitInfo(repo) {
+/**
+ * 本机仓库摘要。走共享的 git 解析（DSH_MESH_GIT → PATH → 常见安装目录），
+ * 否则计划任务式干净 PATH 下这里会把「找不到 git」报成空摘要。
+ * @param {string} repo 仓库目录
+ * @returns {Promise<object>} { path, head, branch, dirty, ahead, behind } 或 { path, error, ...诊断 }
+ */
+async function gitInfo(repo) {
   if (!repo) return { path: '', error: 'no repo path' }
-  const run = (args) => execFileSync('git', ['-C', repo, ...args], { encoding: 'utf8', timeout: 5000, windowsHide: true }).trim()
+  const run = async (args) => {
+    const out = await runGit(['-C', repo, ...args], { timeout: 5000 })
+    if (out.error) {
+      const code = typeof out.error.code === 'string' ? out.error.code : `exit-${out.code}`
+      const error = new Error(out.error.message || out.stderr.trim() || `git ${args[0]} failed`)
+      error.spawnCode = typeof out.error.code === 'string' ? out.error.code : null
+      error.code = code
+      throw error
+    }
+    return out.stdout.trim()
+  }
   try {
-    const head = run(['rev-parse', '--short', 'HEAD'])
-    const branch = run(['rev-parse', '--abbrev-ref', 'HEAD'])
-    const dirty = run(['status', '--porcelain']) !== ''
+    const head = await run(['rev-parse', '--short', 'HEAD'])
+    const branch = await run(['rev-parse', '--abbrev-ref', 'HEAD'])
+    const dirty = (await run(['status', '--porcelain'])) !== ''
     let ahead = null
     let behind = null
     try {
-      const counts = run(['rev-list', '--left-right', '--count', 'HEAD...@{upstream}']).split(/\s+/).map(Number)
+      const counts = (await run(['rev-list', '--left-right', '--count', 'HEAD...@{upstream}'])).split(/\s+/).map(Number)
       ahead = counts[0] || 0
       behind = counts[1] || 0
     } catch {
@@ -27,6 +44,9 @@ function gitInfo(repo) {
     }
     return { path: repo, head, branch, dirty, ahead, behind }
   } catch (error) {
+    if (error?.spawnCode) {
+      return { path: repo, error: `E_GIT_SPAWN: ${error.message}`, ...gitSpawnDiagnostics() }
+    }
     return { path: repo, error: String(error?.message || error) }
   }
 }
@@ -140,7 +160,8 @@ export function buildCluster(ctx) {
               const selfOut = await callPeerTool(peer, { tool: 'mesh_self', args: {}, timeoutMs: Math.min(timeoutMs, 8000) })
               const selfText = selfOut.result?.content?.[0]?.text || '{}'
               const self = JSON.parse(selfText)
-              const repoPath = self.mesh?.repo || join(self.acl?.fsRoots?.[0]?.path || '', 'dsh-mesh')
+              // 对端仓库路径由**对端**决定：用平台无关拼接（Linux 节点拼 Windows 对端路径不能走本机 path.join）
+              const repoPath = self.mesh?.repo || joinRemote(self.acl?.fsRoots?.[0]?.path || '', 'dsh-mesh')
               const statusOut = await callPeerTool(peer, { tool: 'git_status', args: { path: repoPath }, timeoutMs: Math.min(timeoutMs, 8000) })
               const statusText = statusOut.result?.content?.[0]?.text || '{}'
               const status = JSON.parse(statusText)
@@ -157,12 +178,13 @@ export function buildCluster(ctx) {
               peerRepos.push({ peer: peer.name, error: String(error?.message || error) })
             }
           }
+          const localRepo = await gitInfo(process.cwd())
           return ok({
             node: report.node,
             summary: report.summary,
             verdict: report.verdict,
             issues: report.issues,
-            repos: { local: gitInfo(process.cwd()), peers: peerRepos },
+            repos: { local: localRepo, peers: peerRepos },
             instances: (report.instances || []).map((instance) => ({
               id: instance.id,
               label: instance.label,
