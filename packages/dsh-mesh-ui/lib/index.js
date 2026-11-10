@@ -300,7 +300,7 @@ export function apply(ctx) {
         try {
           const fw = JSON.parse(fast.stdout)
           const fi = JSON.parse(fw?.result?.content?.[0]?.text || '{}')
-          if (Array.isArray(fi.peers)) return { via: name, peers: fi.peers, instances: [] }
+          if (Array.isArray(fi.peers)) return { via: name, peers: fi.peers, instances: [], fast: true }
         } catch { /* fall through */ }
       }
       // 兼容旧节点：回退到 cluster_status。
@@ -309,14 +309,14 @@ export function apply(ctx) {
       try {
         const wrapper = JSON.parse(r.stdout)
         const inner = JSON.parse(wrapper?.result?.content?.[0]?.text || '{}')
-        return { via: name, peers: inner.peers || [], instances: inner.remoteInstances || [] }
+        return { via: name, peers: inner.peers || [], instances: inner.remoteInstances || [], fast: false }
       } catch (error) { errors.push({ via: name, error: 'invalid cluster_status' }); return null }
     }))
     for (const result of results.filter(Boolean)) {
       for (const peer of result.peers) {
         const name = String(peer.name || '')
         if (!name || directNames.has(name)) continue
-        nodes.push({ name, via: result.via, up: Boolean(peer.up), latencyMs: peer.latencyMs ?? null, version: peer.version || null, node: peer.node || name })
+        nodes.push({ name, via: result.via, up: peer.up == null ? null : Boolean(peer.up), latencyMs: peer.latencyMs ?? null, version: peer.version || null, node: peer.node || name })
       }
     }
     const data = { ok: true, nodes: nodes.slice(0, 40), errors }

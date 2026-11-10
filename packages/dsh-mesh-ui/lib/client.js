@@ -1243,10 +1243,12 @@ function deviceLinkState(data, peer, lanMap) {
   try {
     var directKeys = {}
     nodes.forEach(function (n) { directKeys[peerDeviceKey(n.devKey)] = true; directKeys[peerDeviceKey(n.name)] = true })
+    var seenFed = {}
     var fedRaw = (props.federated && props.federated.nodes) || []
     fedRaw.forEach(function (item) {
       var dn = peerDeviceKey(item.name)
-      if (!dn || directKeys[dn] || dn === peerDeviceKey(data.nodeName)) return
+      if (!dn || directKeys[dn] || seenFed[dn] || dn === peerDeviceKey(data.nodeName)) return
+      seenFed[dn] = true
       var gi = -1
       for (var ni = 0; ni < nodes.length; ni++) if (peerDeviceKey(nodes[ni].devKey) === peerDeviceKey(item.via)) { gi = ni; break }
       if (gi < 0) return
