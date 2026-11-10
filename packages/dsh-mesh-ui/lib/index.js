@@ -324,6 +324,39 @@ export function apply(ctx) {
     return data
   })
 
+  const peersListRoute = readonlyRoute('/api/dsh-mesh/peers', async () => {
+    const r = await runCli(['peer', 'list'])
+    try { const data = JSON.parse(r.stdout); return { ok: true, peers: (data.peers || []).map((p) => ({ id: p.id, name: p.name, url: p.url, addedAt: p.addedAt || null })) } } catch { return { ok: false, error: 'invalid peer list', stderr: r.stderr } }
+  })
+  const peersRemoveRoute = {
+    kind: 'exact', path: '/api/dsh-mesh/peers/remove',
+    handler: async (req, res) => {
+      if (!isLoopback(req)) return writeJson(res, 403, { ok: false, error: 'forbidden: loopback-only' })
+      if ((req.method || 'GET').toUpperCase() !== 'POST') return writeJson(res, 405, { ok: false, error: 'method not allowed' })
+      const body = await readBody(req)
+      const id = String(body?.id || '').trim()
+      if (!id) return writeJson(res, 400, { ok: false, error: 'id required' })
+      const r = await runCli(['peer', 'remove', id])
+      writeJson(res, 200, { ok: !r.error, error: r.error, stdout: r.stdout, stderr: r.stderr })
+    }
+  }
+  const tokensListRoute = readonlyRoute('/api/dsh-mesh/tokens', async () => {
+    const r = await runCli(['token', 'list'])
+    try { const data = JSON.parse(r.stdout); return { ok: true, tokens: (data || []).map((x) => ({ id: x.id, note: x.note || '', role: x.role || null, roleHint: x.roleHint || '' })) } } catch { return { ok: false, error: 'invalid token list', stderr: r.stderr } }
+  })
+  const tokensRevokeRoute = {
+    kind: 'exact', path: '/api/dsh-mesh/tokens/revoke',
+    handler: async (req, res) => {
+      if (!isLoopback(req)) return writeJson(res, 403, { ok: false, error: 'forbidden: loopback-only' })
+      if ((req.method || 'GET').toUpperCase() !== 'POST') return writeJson(res, 405, { ok: false, error: 'method not allowed' })
+      const body = await readBody(req)
+      const id = String(body?.id || '').trim()
+      if (!id) return writeJson(res, 400, { ok: false, error: 'id required' })
+      const r = await runCli(['revoke', id])
+      writeJson(res, 200, { ok: !r.error, error: r.error, stdout: r.stdout, stderr: r.stderr })
+    }
+  }
+
   const delegateRoutes = [
     readonlyRoute('/api/dsh-mesh/delegations', async (url) => {
       // 缓存整份列表（与请求的 limit 无关），避免不同 limit 的请求互相污染缓存
@@ -353,7 +386,7 @@ export function apply(ctx) {
 
   ctx.effect(() => {
     const disposeRoute = ctx.webServer.register(route)
-    const disposeLanRoutes = [lanScanRoute, lanCodeRoute, lanCheckRoute, lanPairRoute, federatedRoute].map((item) => ctx.webServer.register(item))
+    const disposeLanRoutes = [lanScanRoute, lanCodeRoute, lanCheckRoute, lanPairRoute, federatedRoute, peersListRoute, peersRemoveRoute, tokensListRoute, tokensRevokeRoute].map((item) => ctx.webServer.register(item))
     const disposeRoutes = delegateRoutes.map((item) => ctx.webServer.register(item))
     return () => {
       try {

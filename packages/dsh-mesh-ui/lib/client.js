@@ -1579,6 +1579,66 @@ function deviceLinkState(data, peer, lanMap) {
       )
     }
 
+    function jsonFetch(url, options) {
+      return fetch(url, options).then(function (r) { return r.text() }).then(function (text) { try { return JSON.parse(text) } catch (error) { return { ok: false, error: text.slice(0, 120) } } })
+    }
+
+    // 2026-11-10：节点管理（从本机移除 peer / 吊销入站 token）。
+    function NodeManager(props) {
+      var sp = useState(null); var peers = sp[0]; var setPeers = sp[1]
+      var st = useState(null); var tokens = st[0]; var setTokens = st[1]
+      var sb = useState(false); var busy = sb[0]; var setBusy = sb[1]
+      var sm = useState(''); var msg = sm[0]; var setMsg = sm[1]
+      function refresh() {
+        setBusy(true)
+        Promise.all([jsonFetch('/api/dsh-mesh/peers'), jsonFetch('/api/dsh-mesh/tokens')]).then(function (r) {
+          if (r[0].ok) setPeers(r[0].peers || []); else setMsg(r[0].error || '读取节点失败')
+          if (r[1].ok) setTokens(r[1].tokens || [])
+        }).finally(function () { setBusy(false) })
+      }
+      useEffect(function () { refresh() }, [])
+      function removePeer(peer) {
+        if (!window.confirm('从本机移除节点「' + peer.name + '」？\n这会删除本机到它的连接；对方的入站 token 需在下方吊销。')) return
+        setBusy(true); setMsg('')
+        jsonFetch('/api/dsh-mesh/peers/remove', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: peer.id }) })
+          .then(function (j) { setMsg(j.ok ? '已移除 ' + peer.name : ('移除失败：' + (j.stderr || j.error || '').slice(0, 200))); refresh(); if (props.onChanged) props.onChanged() })
+          .finally(function () { setBusy(false) })
+      }
+      function revokeToken(tok) {
+        if (!window.confirm('吊销入站 token「' + (tok.note || tok.id) + '」？\n该凭据对应的对端会立即失去访问。')) return
+        setBusy(true); setMsg('')
+        jsonFetch('/api/dsh-mesh/tokens/revoke', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: tok.id }) })
+          .then(function (j) { setMsg(j.ok ? '已吊销 ' + tok.id : ('吊销失败：' + (j.stderr || j.error || '').slice(0, 200))); refresh(); if (props.onChanged) props.onChanged() })
+          .finally(function () { setBusy(false) })
+      }
+      return h('div', { className: 'dm-nodes' },
+        h('div', { className: 'dm-lan-row' },
+          h('button', { className: 'dm-btn', disabled: busy, onClick: refresh }, '刷新节点'),
+          h('span', { className: 'dm-sub' }, '移除只影响本机；要让对方也失去访问，请吊销对应入站 token')
+        ),
+        msg ? h('div', { className: 'dm-sub', style: { marginTop: 6 } }, msg) : null,
+        peers === null ? h('div', { className: 'dm-sub' }, '加载中…') :
+          peers.length ? peers.map(function (peer) {
+            return h('div', { className: 'dm-node-row', key: peer.id },
+              h('span', { className: 'dm-dot ok' }),
+              h('span', { className: 'dm-node-name' }, peer.name),
+              h('span', { className: 'dm-node-url' }, maskText(peer.url || '')),
+              h('button', { className: 'dm-btn bad', disabled: busy, onClick: function () { removePeer(peer) } }, '移除')
+            )
+          }) : h('div', { className: 'dm-sub' }, '没有直接配对的节点'),
+        tokens && tokens.length ? h('details', { className: 'dm-details', style: { marginTop: 8 } },
+          h('summary', null, '入站 token（' + tokens.length + '）'),
+          tokens.map(function (tok) {
+            return h('div', { className: 'dm-node-row', key: tok.id },
+              h('span', { className: 'dm-node-name' }, tok.id),
+              h('span', { className: 'dm-node-url' }, (tok.note || '') + (tok.role ? ' · ' + tok.role : '')),
+              h('button', { className: 'dm-btn bad', disabled: busy, onClick: function () { revokeToken(tok) } }, '吊销')
+            )
+          })
+        ) : null
+      )
+    }
+
     // 2026-11-10：局域网首次接入（扫描 / 生成配对码 / 配对）。
     function LanOnboarding() {
       var sNodes = useState(null); var nodes = sNodes[0]; var setNodes = sNodes[1]
@@ -1838,6 +1898,9 @@ function deviceLinkState(data, peer, lanMap) {
         h('details', { className: 'dm-details dm-lan' },
           h('summary', null, '局域网发现 / 配对（首次使用）'),
           h(LanOnboarding)
+        ),
+        h(Details, { title: '节点管理', badge: '移除 / 吊销' },
+          h(NodeManager, { onChanged: function () { load(true) } })
         ),
 
         h('div', { className: 'dm-body', style: splitW > 0 ? { '--dm-main-w': splitW + 'px' } : undefined },
@@ -2574,6 +2637,13 @@ body[data-ds-dark-theme] .dm-dg-fs-item.active { background:rgba(88,166,255,.28)
 .dm-lan-code { font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:12px; padding:6px 8px; border-radius:8px; background:rgba(88,166,255,.1); border:1px solid rgba(88,166,255,.35); word-break:break-all; }
 .dm-toggle { display:inline-flex; align-items:center; gap:5px; font-size:11.5px; opacity:.8; cursor:pointer; user-select:none; white-space:nowrap; }
 .dm-toggle input { margin:0; }
+.dm-nodes { display:flex; flex-direction:column; gap:4px; }
+.dm-node-row { display:flex; align-items:center; gap:8px; padding:6px 0; border-top:1px solid rgba(128,128,128,.14); font-size:12px; }
+.dm-node-row:first-child { border-top:none; }
+.dm-node-name { font-weight:600; min-width:80px; }
+.dm-node-url { opacity:.6; font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:11px; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.dm-btn.bad { border-color:rgba(209,75,65,.55); color:#d14b41; }
+
 .dm-card-node.indirect { opacity:.62; border-style:dashed; border-color:rgba(128,128,128,.45); background:rgba(128,128,128,.03); }
 .dm-fed-badge { font-size:10px; opacity:.6; padding:1px 5px; border:1px dashed rgba(128,128,128,.5); border-radius:999px; white-space:nowrap; }
 .dm-edge-indirect { stroke:rgba(128,128,128,.5); stroke-width:1.1; fill:none; }
