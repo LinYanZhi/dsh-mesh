@@ -445,14 +445,30 @@ body.light .dm-edge-label { stroke: rgba(255,255,255,.92); }
     }
 
     // ---------- 画布：缩放 / 平移 ----------
+    // 2026-11-10：当前筛选下可见的服务器数量（0/1/2），用于拓扑布局
+    function visibleServerCount(data, show) {
+      var s = show || { lan: true, public: true, sakura: true }
+      var d = data || {}
+      var peers = filterSelfPeers(dedupePeers(d.peers || []), d.nodeName)
+      var hasPublic = Boolean(publicEntryFor(d.localTunnel || {})) || peers.some(function (p) { var pt = p.tunnel || {}; return !isLanPeer(p) && Boolean(pt.host) && (pt.kind === 'frp' || pt.kind === 'wan') })
+      var acc = sakuraAccountOf(d)
+      var hasSakura = Boolean(acc && (acc.tunnels || []).length)
+      return (s.public && hasPublic ? 1 : 0) + (s.sakura && hasSakura ? 1 : 0)
+    }
+
     function Viewport(props) {
       var layout = props.layout
+      // 2026-11-10：按当前筛选的可见服务器数量决定布局（0/1/2）
+      var currentFilters = (function () { try { var s = JSON.parse(window.localStorage.getItem('dsh-mesh-ui.filters.v1') || '{}') || {}; return { lan: s.lan !== false, public: s.public !== false, sakura: s.sakura !== false } } catch (_) { return { lan: true, public: true, sakura: true } } })()
+      var serverCount = visibleServerCount(props.data, currentFilters)
       // 2026-11-09-v5：卡片宽度自适应 —— 子组件测量真实卡片宽高后回传，按实际尺寸重算多边形布局
       var sizeState = useState(null)
       var measuredSize = sizeState[0]
       var setMeasuredSize = sizeState[1]
       if (measuredSize && measuredSize.w > 0 && measuredSize.h > 0) {
-        layout = computeLayout(layout.count, { cardW: measuredSize.w, cardH: measuredSize.h })
+        layout = computeLayout(layout.count, { cardW: measuredSize.w, cardH: measuredSize.h, serverCount: serverCount })
+      } else {
+        layout = computeLayout(layout.count, { serverCount: serverCount })
       }
       var infraBoundsRef = useRef([])
       // 2026-11-09：重置拓扑时同时通知 Topology 复位服务器卡片
@@ -484,7 +500,7 @@ body.light .dm-edge-label { stroke: rgba(255,255,255,.92); }
         var m = movedLayout[nodeKeys[idx]]
         if (m && m.length === 2) return [Number(m[0]), Number(m[1])]
         var devKey = devKeyOfNodeKey(nodeKeys[idx], props.data)
-        var def = DEFAULT_DEVICE_POS[devKey]
+        var def = layout.mode === 'servers-top' ? DEFAULT_DEVICE_POS[devKey] : null
         if (def) return [def[0], def[1]]
         return [p[0] + baseOffsetX, p[1] + baseOffsetY]
       })
@@ -500,9 +516,7 @@ body.light .dm-edge-label { stroke: rgba(255,255,255,.92); }
       function resetLayout() {
         setMovedLayout({})
         saveMovedLayout({})
-        // 2026-11-09：重置也恢复画布高度（用户反馈重置后"高度拉得很长"其实是之前拖拽的高度被保留）
-        setCustomHeight(0)
-        try { window.localStorage.removeItem('dsh-mesh-ui.viewportH.v1') } catch (_) { /* ignore */ }
+        // 2026-11-10：重置只恢复拓扑结构，保留用户手动拖拽的画布高度
         interactedRef.current = false
         bumpResetNonce(function (x) { return x + 1 })
         setTimeout(fit, 120)
@@ -651,7 +665,7 @@ body.light .dm-edge-label { stroke: rgba(255,255,255,.92); }
       // 2026-11-10：布局变化（节点数/卡片尺寸）后自动 fit（用户未手动缩放/平移时），避免停留在旧的缩放比例
       useEffect(function () {
         if (!interactedRef.current) setTimeout(fit, 40)
-      }, [layout.count, layout.cardW, layout.cardH])
+      }, [layout.count, layout.cardW, layout.cardH, layout.mode])
 
       useEffect(function () {
         var el = viewRef.current
@@ -752,6 +766,58 @@ body.light .dm-edge-label { stroke: rgba(255,255,255,.92); }
     //   4 节点 = 菱形（上/右/下/左）；5 节点 = 顶点朝上的五边形；6 = 六边形；n 节点 = 顶点朝上的正 n 边形。
     //   相邻节点的「轴对齐包围盒」必须留出 GAP，否则菱形斜向两张卡会贴住/重叠。
     // 2026-11-09-v6：默认布局 = 顶部「阿里云 / 樱花」服务器一排 + 设备沿下方弧线扇形展开（用户指定）
+
+    // 2026-11-10：按可见服务器数量布局
+    // 0 个服务器：仅节点，圆环居中；1 个服务器：服务器居中，节点在下方扇形展开；2 个：顶部服务器 + 下方弧线（原布局）
+    function polygonEdges(count) {
+      var edges = []
+      for (var m = 0; m < count; m++) for (var n = m + 1; n < count; n++) edges.push([m, n])
+      return edges
+    }
+    function layoutNodesOnly(count, cardW, cardH, GAP, PAD) {
+      var n = Math.max(1, count)
+      var radius = 0
+      if (n > 1) radius = Math.max((cardW + GAP) / (2 * Math.sin(Math.PI / n)), cardH * 1.2)
+      var raw = []
+      for (var i = 0; i < n; i++) {
+        var a = -Math.PI / 2 + (i * 2 * Math.PI) / n
+        raw.push([radius * Math.cos(a), radius * Math.sin(a)])
+      }
+      var minX = Math.min(-cardW / 2, ...raw.map(function (p) { return p[0] - cardW / 2 }))
+      var maxX = Math.max(cardW / 2, ...raw.map(function (p) { return p[0] + cardW / 2 }))
+      var minY = Math.min(-cardH / 2, ...raw.map(function (p) { return p[1] - cardH / 2 }))
+      var maxY = Math.max(cardH / 2, ...raw.map(function (p) { return p[1] + cardH / 2 }))
+      var ox = -minX + PAD
+      var oy = -minY + PAD
+      var positions = raw.map(function (p) { return [Math.round(p[0] + ox), Math.round(p[1] + oy)] })
+      var W = Math.ceil(maxX - minX + PAD * 2)
+      var H = Math.ceil(maxY - minY + PAD * 2)
+      var topDeviceY = positions.length ? Math.min.apply(null, positions.map(function (p) { return p[1] })) : 0
+      return { count: n, cardW: cardW, cardH: cardH, gap: GAP, W: W, H: H, positions: positions, edges: polygonEdges(n), topDeviceY: topDeviceY, mode: 'nodes-only', serverCenter: null }
+    }
+    function layoutServerCenter(count, cardW, cardH, GAP, PAD) {
+      var n = Math.max(1, count)
+      var span = (2 * Math.PI) / 3
+      var step = n > 1 ? span / (n - 1) : 0
+      var radius = Math.max(cardH * 2.1, cardW * 1.25, step > 0 ? (cardW + GAP) / (2 * Math.sin(step / 2)) : 0)
+      var raw = []
+      for (var i = 0; i < n; i++) {
+        var a = Math.PI / 6 + i * step
+        raw.push([radius * Math.cos(a), radius * Math.sin(a)])
+      }
+      var minX = Math.min(-cardW / 2, ...raw.map(function (p) { return p[0] - cardW / 2 }))
+      var maxX = Math.max(cardW / 2, ...raw.map(function (p) { return p[0] + cardW / 2 }))
+      var minY = Math.min(-cardH / 2, ...raw.map(function (p) { return p[1] - cardH / 2 }))
+      var maxY = Math.max(cardH / 2, ...raw.map(function (p) { return p[1] + cardH / 2 }))
+      var ox = -minX + PAD
+      var oy = -minY + PAD
+      var positions = raw.map(function (p) { return [Math.round(p[0] + ox), Math.round(p[1] + oy)] })
+      var W = Math.ceil(maxX - minX + PAD * 2)
+      var H = Math.ceil(maxY - minY + PAD * 2)
+      var topDeviceY = positions.length ? Math.min.apply(null, positions.map(function (p) { return p[1] })) : 0
+      return { count: n, cardW: cardW, cardH: cardH, gap: GAP, W: W, H: H, positions: positions, edges: polygonEdges(n), topDeviceY: topDeviceY, mode: 'server-center', serverCenter: [Math.round(ox), Math.round(oy)] }
+    }
+
     function computeLayout(count, override) {
       var GAP = 30
       var cardW = count <= 4 ? 210 : count <= 6 ? 196 : 176
@@ -759,6 +825,9 @@ body.light .dm-edge-label { stroke: rgba(255,255,255,.92); }
       if (override && override.cardW > 0) cardW = Math.ceil(override.cardW)
       if (override && override.cardH > 0) cardH = Math.ceil(override.cardH)
       var PAD = 16
+      var serverCount = override && Number.isInteger(override.serverCount) ? override.serverCount : 2
+      if (serverCount === 0) return layoutNodesOnly(count, cardW, cardH, GAP, PAD)
+      if (serverCount === 1) return layoutServerCenter(count, cardW, cardH, GAP, PAD)
       var topTierH = Math.round(cardH * 1.1)
       var W, H, positions
       if (count <= 1) {
@@ -803,7 +872,7 @@ body.light .dm-edge-label { stroke: rgba(255,255,255,.92); }
       var edges = []
       for (var m = 0; m < count; m++) for (var n = m + 1; n < count; n++) edges.push([m, n])
       var topDeviceY = positions.length ? Math.min.apply(null, positions.map(function (p) { return p[1] })) : 0
-      return { count: count, cardW: cardW, cardH: cardH, gap: GAP, W: W, H: H, positions: positions, edges: edges, topDeviceY: topDeviceY }
+      return { count: count, cardW: cardW, cardH: cardH, gap: GAP, W: W, H: H, positions: positions, edges: edges, topDeviceY: topDeviceY, mode: 'servers-top', serverCenter: null }
     }
     // ---------- 架构层：公网中转站（frps）与各节点通信关系（2026-11-09） ----------
     function RelayLayer(props) {
@@ -1143,7 +1212,15 @@ function deviceLinkState(data, peer, lanMap) {
   var infraState = useState(function () { try { return JSON.parse(window.localStorage.getItem('dsh-mesh-ui.infra.v2') || '{}') || {} } catch (e) { return {} } })
   var infraPos = infraState[0]
   var setInfraPos = infraState[1]
-  function infraPosition(idx) { var k = infra[idx].key; var v = infraPos[k]; if (v && v.length === 2) return v; var def = DEFAULT_INFRA_POS[infra[idx].transport === 'public' ? 'aliyun' : 'sakura']; if (def) return [def[0], def[1]]; return infraDefaultPos(idx) }
+  function infraPosition(idx) {
+    var k = infra[idx].key
+    var v = infraPos[k]
+    if (v && v.length === 2) return v
+    if (layout.mode === 'server-center') return layout.serverCenter || infraDefaultPos(idx)
+    var def = layout.mode === 'servers-top' ? DEFAULT_INFRA_POS[infra[idx].transport === 'public' ? 'aliyun' : 'sakura'] : null
+    if (def) return [def[0], def[1]]
+    return infraDefaultPos(idx)
+  }
   useEffect(function () {
     if (!props.resetNonce) return
     try { window.localStorage.removeItem('dsh-mesh-ui.infra.v2') } catch (e) { /* ignore */ }
