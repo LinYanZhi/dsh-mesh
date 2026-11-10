@@ -266,7 +266,11 @@ export function apply(ctx) {
       if (!body || typeof body.url !== 'string' || typeof body.code !== 'string') {
         return writeJson(res, 400, { ok: false, error: 'url and code required' })
       }
-      const args = ['peer', 'add', '--url', String(body.url), '--code', String(body.code), '--name', String(body.name || 'lan-peer')]
+      const pairingCode = String(body.code).trim()
+      if (pairingCode.replace(/-/g, '').length < 6) {
+        return writeJson(res, 400, { ok: false, error: 'pairing code is required (one-time code from the target node)' })
+      }
+      const args = ['peer', 'add', '--url', String(body.url), '--code', pairingCode, '--name', String(body.name || 'lan-peer')]
       if (body.fingerprint) args.push('--fingerprint', String(body.fingerprint))
       try {
         const r = await runCli(args)

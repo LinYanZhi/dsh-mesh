@@ -1597,7 +1597,7 @@ function deviceLinkState(data, peer, lanMap) {
         h('div', { className: 'dm-lan-row' },
           h('button', { className: 'dm-btn', disabled: busy, onClick: scan }, busy ? '处理中…' : '扫描局域网'),
           h('button', { className: 'dm-btn', disabled: busy, onClick: myCode }, '生成我的配对码'),
-          h('span', { className: 'dm-sub' }, '对方的 mesh 需 bind 0.0.0.0；第一次可能需放行 8124')
+          h('span', { className: 'dm-sub' }, '扫描只发现节点，不会自动连接；配对必须输入对方生成的一次性配对码')
         ),
         msg ? h('div', { className: 'dm-sub', style: { marginTop: 6 } }, msg) : null,
         mine ? h('div', { className: 'dm-lan-code', style: { marginTop: 8 } }, '配对码 ' + mine.pairingCode + ' · ' + (mine.endpoint || '') + (mine.certFingerprint ? ' · 指纹 ' + mine.certFingerprint : '')) : null,
@@ -1607,7 +1607,7 @@ function deviceLinkState(data, peer, lanMap) {
               h('span', { className: 'dm-dot ok' }),
               h('span', null, (node.node || '?') + ' · ' + (node.url || '').replace('/mcp', '')),
               h('button', { className: 'dm-btn', disabled: busy, onClick: function () { checkNode(node) } }, '检查链路'),
-              h('button', { className: 'dm-btn primary', disabled: busy, onClick: function () { pairWith(node) } }, '用此节点配对')
+              h('button', { className: 'dm-btn primary', disabled: busy || !String(code || '').trim(), onClick: function () { pairWith(node) } }, '用此节点配对')
             )
           })
         ) : null,

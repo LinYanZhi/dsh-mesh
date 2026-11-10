@@ -61,7 +61,7 @@
 - **relay**：一台有公网的 VPS 跑 frps 即可让 NAT 后的节点互通（TLS + token + 指纹 pin）。
 - **桌面直控**（可选，默认关闭）：`pc_action` / `pc_app` / `pc_window` / `pc_browser`。
 
-## Security / 安全
+## Security / 安全\n\n- **扫描只发现，不自动连接**：局域网发现只列出节点；建立连接必须由一方生成一次性配对码、另一方输入兑换。空码请求会被服务端拒绝。\n- Discovery broadcasts only node name/URL/cert fingerprint on the LAN (no tokens). Pairing requires a one-time code; codes expire and are single-use.
 
 - 远程桌面控制默认**关闭**，需在目标节点显式开启
 - 每个 peer 独立 token + 最小 ACL；deny-by-default；审计日志；限频
