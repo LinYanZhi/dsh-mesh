@@ -176,6 +176,8 @@ export function apply(ctx) {
     }),
     readonlyRoute('/api/dsh-mesh/session', async (url) => {
       const node = String(url.searchParams.get('node') || '')
+      // 2026-11-10：本机任务（node=local）没有对端会话，直接给出明确错误，避免 peer call --to local 报 unknown peer
+      if (/^(local|self|localhost)$/i.test(node)) return { ok: false, code: "E_LOCAL_NODE", error: "本机任务（local）没有对端会话；请在 DSH 侧栏查看本机会话" }
       const sessionId = String(url.searchParams.get('sessionId') || '')
       const limit = Number(url.searchParams.get('limit')) || 40
       if (!node || !sessionId) return { ok: false, error: 'node and sessionId required' }

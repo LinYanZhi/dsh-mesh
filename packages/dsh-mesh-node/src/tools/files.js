@@ -154,21 +154,24 @@ function findFiles(ctx, { query, root, limit = 100, exts = null, minSizeBytes = 
     if (exts?.length) args.push('-r', `.*\\.(${exts.map((e) => String(e).replace(/^\\./, '')).join('|')})$`)
     args.push(String(query || ''))
     const r = spawnSync(es.path, args, { encoding: 'utf8', windowsHide: true, timeout: 15000 })
-    try {
-      const rows = JSON.parse(r.stdout || '[]')
-      return ok({
-        tool: 'everything',
-        count: rows.length,
-        entries: rows.slice(0, 500).map((row) => ({
-          path: String(row.path || row.full_path || ''),
-          name: String(row.name || basename(String(row.path || ''))),
-          type: Number(row.type) === 2 ? 'dir' : 'file',
-          sizeBytes: row.size == null ? null : Number(row.size),
-          mtimeMs: isoMs(row.date_modified)
-        }))
-      })
-    } catch {
-      /* fallthrough */
+    // es.exe 在 session 0 连不上 Everything IPC 时退出码非 0（stderr: Error 8），必须回退 fd/walk
+    if (r.status === 0) {
+      try {
+        const rows = JSON.parse(r.stdout || '[]')
+        return ok({
+          tool: 'everything',
+          count: rows.length,
+          entries: rows.slice(0, 500).map((row) => ({
+            path: String(row.path || row.full_path || ''),
+            name: String(row.name || basename(String(row.path || ''))),
+            type: Number(row.type) === 2 ? 'dir' : 'file',
+            sizeBytes: row.size == null ? null : Number(row.size),
+            mtimeMs: isoMs(row.date_modified)
+          }))
+        })
+      } catch {
+        /* fallthrough */
+      }
     }
   }
   const fd = toolInfo('fd')

@@ -678,7 +678,7 @@ body.light .dm-edge-label { stroke: rgba(255,255,255,.92); }
             h('span', null, '⋯')
           )
         ),
-        h('div', { className: 'dm-hint' }, '拓扑 v19 · 内容 ' + Math.round(layout.W) + '×' + Math.round(layout.H) + 'px · 卡 ' + Math.round(layout.cardW) + '×' + Math.round(layout.cardH) + ' · 缩放 ' + Math.round(view.scale * 100) + '% · 滚轮缩放 / 拖拽平移')
+        h('div', { className: 'dm-hint' }, '拓扑 v21 · 内容 ' + Math.round(layout.W) + '×' + Math.round(layout.H) + 'px · 卡 ' + Math.round(layout.cardW) + '×' + Math.round(layout.cardH) + ' · 缩放 ' + Math.round(view.scale * 100) + '% · 滚轮缩放 / 拖拽平移')
       )
     }
 
@@ -1293,6 +1293,32 @@ function deviceLinkState(data, peer, lanMap) {
         return v
       }
 
+      // 2026-11-10：设备状态与拓扑同口径 —— 任一链路可达即算在线（HTTP 探测偶发超时不再误判红点）
+      var lanUpByDev = {}
+      ;(data.peers || []).forEach(function (p) {
+        if (!isLanPeer(p)) return
+        var tu = p.tunnel || {}
+        lanUpByDev[peerDeviceKey(p.name)] = tu.probe ? tu.probe.up === true : Boolean(p.up)
+      })
+      function peerLinkState(peer) {
+        var t = peer.tunnel || {}
+        var httpUp = Boolean(peer.up)
+        var tcpUp = t.probe ? t.probe.up === true : false
+        var sk = sakuraTunnelOf(data, peerDeviceKey(peer.name))
+        var sakuraUp = sk ? sk.online === true : null
+        var lanUp = lanUpByDev[peerDeviceKey(peer.name)] === true
+        return {
+          httpUp: httpUp, tcpUp: tcpUp, sakuraUp: sakuraUp, lanUp: lanUp,
+          up: httpUp || tcpUp || sakuraUp === true || lanUp
+        }
+      }
+      function linkStateText(ls) {
+        return "公网 " + ((ls.httpUp || ls.tcpUp) ? "✅" : "❌")
+          + " / 樱花 " + (ls.sakuraUp == null ? "—" : (ls.sakuraUp ? "✅" : "❌"))
+          + (ls.lanUp ? " / LAN ✅" : "")
+          + (ls.httpUp ? "" : "（HTTP 超时，隧道" + (ls.tcpUp ? "通" : "断") + "）")
+      }
+
       var devices = [{
         key: 'local',
         name: nodeDisplay(data.nodeName) + '（本机）',
@@ -1310,11 +1336,12 @@ function deviceLinkState(data, peer, lanMap) {
         ]
       }].concat(peers.map(function (peer) {
         var t = peer.tunnel || {}
+        var ls = peerLinkState(peer)
         var hwp = peer.hardware || {}
         return {
           key: 'peer:' + peer.name,
           name: nodeDisplay(peerDeviceKey(peer.name)),
-          up: Boolean(peer.up),
+          up: ls.up,
           rows: [
             ['设备类型', formFactorOf(hwp)],
             ['操作系统', hwp.os || peer.os || '—'],
@@ -1324,7 +1351,8 @@ function deviceLinkState(data, peer, lanMap) {
             ['DSH 版本', dshVerOf(peer)],
             ['IP 类型', ipKindOf(peer)],
             ['端口号', t.port ? String(t.port) : '—'],
-            ['公网穿透类型', relayKindOf(peer)]
+            ['公网穿透类型', relayKindOf(peer)],
+            ['链路状态', linkStateText(ls)]
           ]
         }
       }))
@@ -1901,6 +1929,11 @@ body[data-ds-dark-theme] .dm-dg-fs-item.active { background:rgba(88,166,255,.28)
 
       function loadSession() {
         if (!selected || !selected.sessionId) return
+        // 2026-11-10：本机任务（local）没有对端会话，不要发 peer call
+        if (/^(local|self|localhost)$/i.test(String(selected.node || ''))) {
+          flash('bad', '本机任务（local）没有对端会话；请在 DSH 侧栏查看本机会话')
+          return
+        }
         setSessionLoading(true)
         dgFetch(DG_API_SESSION + '?node=' + encodeURIComponent(selected.node) + '&sessionId=' + encodeURIComponent(selected.sessionId) + '&limit=60')
           .then(function (json) {
@@ -2166,7 +2199,7 @@ body[data-ds-dark-theme] .dm-dg-fs-item.active { background:rgba(88,166,255,.28)
                       '对端会话',
                       h('span', { className: 'dm-dg-sub' }, session ? ('轮次 ' + (session.totalMessages || sessionMessages.length) + ' · 帧 ' + (session.frameCount || '—') + ' · ' + Math.round((session.bytes || 0) / 1024) + ' KB') : '只读'),
                       h('span', { className: 'dm-dg-spacer' }),
-                      h('button', { type: 'button', className: 'dm-dg-btn primary', onClick: loadSession, disabled: sessionLoading || !selected.sessionId },
+                      h('button', { type: 'button', className: 'dm-dg-btn primary', onClick: loadSession, disabled: sessionLoading || !selected.sessionId || /^(local|self|localhost)$/i.test(String(selected.node || '')) },
                         sessionLoading ? h('span', { className: 'dm-dg-loading' }, h('span', { className: 'dm-dg-spin' }), '加载中') : (session ? '重新加载' : '加载会话'))
                     ),
                     h('div', { className: 'dm-dg-sec-body' },
