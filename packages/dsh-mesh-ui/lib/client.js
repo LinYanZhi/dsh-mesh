@@ -503,7 +503,7 @@ body.light .dm-edge-label { stroke: rgba(255,255,255,.92); }
         var m = movedLayout[nodeKeys[idx]]
         if (m && m.length === 2) return [Number(m[0]), Number(m[1])]
         var devKey = devKeyOfNodeKey(nodeKeys[idx], props.data)
-        var def = layout.mode === 'servers-top' ? DEFAULT_DEVICE_POS[devKey] : null
+        var def = (layout.mode === 'servers-top' || layout.mode === 'servers-top-single') ? DEFAULT_DEVICE_POS[devKey] : null
         if (def) return [def[0], def[1]]
         return [p[0] + baseOffsetX, p[1] + baseOffsetY]
       })
@@ -863,7 +863,6 @@ body.light .dm-edge-label { stroke: rgba(255,255,255,.92); }
       var PAD = 16
       var serverCount = override && Number.isInteger(override.serverCount) ? override.serverCount : 2
       if (serverCount === 0) return layoutNodesOnly(count, cardW, cardH, GAP, PAD)
-      if (serverCount === 1) return layoutServerCenter(count, cardW, cardH, GAP, PAD)
       var topTierH = Math.round(cardH * 1.1)
       var W, H, positions
       if (count <= 1) {
@@ -908,7 +907,7 @@ body.light .dm-edge-label { stroke: rgba(255,255,255,.92); }
       var edges = []
       for (var m = 0; m < count; m++) for (var n = m + 1; n < count; n++) edges.push([m, n])
       var topDeviceY = positions.length ? Math.min.apply(null, positions.map(function (p) { return p[1] })) : 0
-      return { count: count, cardW: cardW, cardH: cardH, gap: GAP, W: W, H: H, positions: positions, edges: edges, topDeviceY: topDeviceY, mode: 'servers-top', serverCenter: null }
+      return { count: count, cardW: cardW, cardH: cardH, gap: GAP, W: W, H: H, positions: positions, edges: edges, topDeviceY: topDeviceY, mode: serverCount === 1 ? 'servers-top-single' : 'servers-top', serverCenter: null }
     }
     // ---------- 架构层：公网中转站（frps）与各节点通信关系（2026-11-09） ----------
     function RelayLayer(props) {
@@ -1253,6 +1252,7 @@ function deviceLinkState(data, peer, lanMap) {
     var v = infraPos[k]
     if (v && v.length === 2) return v
     if (layout.mode === 'server-center') return layout.serverCenter || infraDefaultPos(idx)
+    if (layout.mode === 'servers-top-single') return [Math.round((DEFAULT_INFRA_POS.aliyun[0] + DEFAULT_INFRA_POS.sakura[0]) / 2), Math.round((DEFAULT_INFRA_POS.aliyun[1] + DEFAULT_INFRA_POS.sakura[1]) / 2)]
     var def = layout.mode === 'servers-top' ? DEFAULT_INFRA_POS[infra[idx].transport === 'public' ? 'aliyun' : 'sakura'] : null
     if (def) return [def[0], def[1]]
     return infraDefaultPos(idx)
