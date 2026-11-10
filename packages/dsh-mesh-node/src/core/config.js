@@ -81,7 +81,8 @@ export const DEFAULT_ALLOW = [
   'delegate_reply',
   'delegate_list',
   'delegate_candidates',
-  'delegate_gc'
+  'delegate_gc',
+  'delegate_cancel'
 ]
 
 /** 文件/检索工具（v7.1 加入默认 ACL；老默认列表会自动升级，自定义列表保持不动） */

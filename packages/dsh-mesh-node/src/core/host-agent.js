@@ -243,6 +243,19 @@ export function createHostClient({ config, home, log = console, instance }) {
       })
     },
     /**
+     * Abort the Session's active turn immediately (DSH's own stop button: the
+     * inbox is kept). Requires dsh-mesh-host >= 0.5.0; an older plugin answers
+     * 404 "unknown endpoint", which callers must surface instead of falling back
+     * to an inbox message (a queued message only lands after the turn ends).
+     */
+    async cancelSession({ sessionId } = {}) {
+      return call('/host/sessions/cancel', {
+        method: 'POST',
+        body: { sessionId },
+        timeoutMs: 30000
+      })
+    },
+    /**
      * Tail one allow-listed log file on the peer machine (mesh home root or
      * `<mesh home>/logs`, `*.log` only; secrets are redacted by the bridge).
      * Requires dsh-mesh-host >= 0.4.0; older plugins answer 404 unknown endpoint.

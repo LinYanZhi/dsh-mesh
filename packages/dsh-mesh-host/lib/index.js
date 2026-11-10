@@ -7,6 +7,7 @@
  * remote peer can:
  *   - create a fresh Session (`/host/sessions/create` → sessionController.create)
  *   - prompt a Session without a web cookie (`/host/prompt`)
+ *   - abort one Session's active turn (`/host/sessions/cancel` → sessionController.cancel)
  *   - wake a live session (`/host/wake` → agent inbox + followup)
  *   - list host sessions and their status (`/host/agents`, `/host/sessions`)
  *   - list / call tools registered in *this* DSH instance (`/host/tools`,
@@ -37,7 +38,7 @@ export const name = 'dsh-mesh-host'
 /** Services this plugin needs before `apply` runs. */
 export const inject = ['tools', 'agents']
 
-export const PLUGIN_VERSION = '0.4.0'
+export const PLUGIN_VERSION = '0.5.0'
 const MAX_BODY_BYTES = 256 * 1024
 const DEFAULT_TIMEOUT_MS = 120_000
 
@@ -538,6 +539,57 @@ export function apply(ctx) {
             code: error?.code || 'E_HOST_PROMPT',
             message: error?.message || String(error)
           })
+        }
+      }
+
+      if (req.method === 'POST' && url.pathname === '/host/sessions/cancel') {
+        let payload
+        try {
+          payload = JSON.parse((await readBody(req)) || '{}')
+        } catch {
+          return json(res, 400, { ok: false, code: 'E_INVALID_ARG', message: 'body must be JSON' })
+        }
+        const sessionId = String(payload.sessionId || '').trim()
+        if (!sessionId) {
+          return json(res, 400, { ok: false, code: 'E_INVALID_ARG', message: 'sessionId is required' })
+        }
+        // The web UI's own stop button: sessionController.cancel aborts the active
+        // turn and keeps pending inbox work. Profiles that mount no such controller
+        // answer 501, so an old bridge (404 "unknown endpoint") stays distinguishable.
+        const controller = sessionController()
+        if (!controller || typeof controller.cancel !== 'function') {
+          return json(res, 501, {
+            ok: false,
+            code: 'E_HOST_NO_CONTROLLER',
+            message: 'this DSH profile mounts no sessionController service with cancel (session cancel unavailable)'
+          })
+        }
+        let agent
+        try {
+          agent = ctx.agents.get(sessionId)
+        } catch {
+          agent = undefined
+        }
+        // Agent.cancel() is a no-op on an idle agent: report whether a turn was really aborted.
+        const wasRunning = agent?.status === 'running'
+        try {
+          const value = await controller.cancel({ sessionId })
+          return json(res, 200, {
+            ok: true,
+            sessionId,
+            cancelled: true,
+            wasRunning,
+            accepted: value?.accepted !== false,
+            plugin: PLUGIN_VERSION
+          })
+        } catch (error) {
+          const message = error?.message || String(error)
+          const code = error?.code || ''
+          const missing = code === 'session/not-found' || /not found \(not attached\)/u.test(message)
+          if (missing) {
+            return json(res, 404, { ok: false, code: 'E_HOST_CANCEL', message })
+          }
+          return json(res, 200, { ok: false, code: code || 'E_HOST_CANCEL', message })
         }
       }
 

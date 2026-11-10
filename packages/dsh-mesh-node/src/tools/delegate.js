@@ -553,6 +553,115 @@ export function buildDelegate(ctx) {
       }
     },
     {
+      name: 'delegate_cancel',
+      title: 'Abort the running turn of a delegation task on this machine',
+      description:
+        'Immediately ABORT the current turn of the DSH session that owns a delegation task — no injected message, no waiting for the turn to finish. Only tasks registered on THIS node (a request.json under <fsRoot>/.mesh/tasks/<taskId>/) can be cancelled; an arbitrary sessionId is not accepted, so ordinary/business conversations cannot be stopped through this route. Marks status.json state=cancelled (result.json is kept untouched). Requires dsh-mesh-host >= 0.5.0 on this node: an older bridge answers 404 unknown endpoint and the call fails with E_HOST_NO_CANCEL — there is no silent fallback to archive/channel_wake.',
+      inputSchema: z.object({
+        taskId: z.string().min(1).describe('Task id of a delegation task registered on this node (returned by delegate).'),
+        reason: z.string().max(2000).optional().describe('Why it is cancelled; recorded in status.json.')
+      }),
+      handler: async ({ taskId, reason = '' }) => {
+        try {
+          const config = ctx.getConfig()
+          const root = localRoot(config)
+          const paths = taskPaths(root, taskId)
+          if (!existsSync(paths.request)) {
+            return fail('E_NOT_FOUND', `unknown taskId: ${taskId} — no request.json under ${join(root, '.mesh', 'tasks')}; only delegation tasks registered on this node can be cancelled here`)
+          }
+          const request = readJson(paths.request, null)
+          if (!request) return fail('E_NOT_FOUND', `request.json is unreadable: ${paths.request}`)
+          const status = readJson(paths.status, null) || {}
+          const state = status.state || 'submitted'
+          if (state === 'cancelled') {
+            return ok({
+              ok: true,
+              taskId,
+              sessionId: String(request.sessionId || ''),
+              cancelled: true,
+              already: true,
+              state,
+              via: 'host/sessions/cancel',
+              note: 'status.json already says cancelled — nothing was aborted again'
+            })
+          }
+          if (TERMINAL.has(state)) {
+            return fail('E_TASK_TERMINAL', `task ${taskId} is already ${state} (terminal) — it cannot be cancelled`, { state })
+          }
+          const sessionId = String(request.sessionId || '')
+          if (!sessionId) return fail('E_TASK_NO_SESSION', `task ${taskId} carries no sessionId in request.json — there is no session to abort`)
+          const client = createHostClient({ config, home: ctx.home, log: ctx.log, instance: request.instance || undefined })
+          let cancelResult
+          try {
+            cancelResult = await client.cancelSession({ sessionId })
+          } catch (error) {
+            const code = String(error?.code || '')
+            const message = String(error?.message || error)
+            // Old bridge = route absent: 404 + "unknown endpoint". Surface an upgrade
+            // error; a channel_wake fallback would only queue text behind the turn.
+            if (code === 'E_NOT_FOUND' && /unknown endpoint/i.test(message)) {
+              return fail('E_HOST_NO_CANCEL', `host bridge has no /host/sessions/cancel (${message})`, {
+                hint: '对端 dsh-mesh-host < 0.5.0 需升级：在目标节点执行 node scripts/self-update.mjs apply-local --instance <id>，等插件热更新后重试'
+              })
+            }
+            if (code === 'E_HOST_CANCEL') {
+              return fail('E_SESSION_GONE', `the delegated session is no longer live on this node: ${sessionId}`, {
+                sessionId,
+                hint: '实例重启或会话已结束：任务状态未改，请用 delegate_status 确认实际状态'
+              })
+            }
+            return fail(code || 'E_HOST_CANCEL', `host bridge cancel failed: ${message}`, { sessionId })
+          }
+          const cancelledAt = new Date().toISOString()
+          const cancelledBy = ctx.peerId || 'local'
+          const wasRunning = cancelResult?.wasRunning === true
+          writeJson(paths.status, {
+            ...status,
+            state: 'cancelled',
+            previousState: state,
+            cancelledAt,
+            cancelledBy,
+            cancelVia: 'host/sessions/cancel',
+            cancelReason: String(reason || ''),
+            wasRunning,
+            summary: `[cancel] 委托会话当前轮已直接中止（by ${cancelledBy}）`,
+            updatedAt: cancelledAt
+          })
+          // Keep the local ledger in step with status.json, exactly like delegate() does
+          // on creation. A ledger hiccup must not undo a cancellation that already happened.
+          try {
+            updateRegistry((data) => {
+              const existing = data.tasks?.[taskId]
+              if (!existing) return data
+              data.tasks[taskId] = { ...existing, state: 'cancelled', updatedAt: cancelledAt }
+              const conversation = data.conversations?.[existing.conversationId]
+              if (conversation) conversation.activeTask = null
+              return data
+            }, ctx.home)
+          } catch (error) {
+            try {
+              ctx.log?.warn?.(`delegate_cancel registry write failed (status.json already written): ${error?.message || error}`)
+            } catch {
+              /* logging must not fail the cancel */
+            }
+          }
+          return ok({
+            ok: true,
+            taskId,
+            sessionId,
+            cancelled: true,
+            via: 'host/sessions/cancel',
+            wasRunning,
+            cancelledAt,
+            cancelledBy,
+            ...(wasRunning ? {} : { note: '该会话当时没有在跑的轮次（已空闲或刚结束）；任务已标记 cancelled，但没有发生真正的中断' })
+          })
+        } catch (error) {
+          return hostError(error)
+        }
+      }
+    },
+    {
       name: 'delegate_list',
       title: 'List delegation tasks on this machine',
       description: 'List recent delegation task files under <fsRoot>/.mesh/tasks/ with state, workspace, sessionId, summary and stale flag. Read-only.',
