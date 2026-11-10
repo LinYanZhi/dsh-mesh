@@ -507,7 +507,9 @@ body.light .dm-edge-label { stroke: rgba(255,255,255,.92); }
         if (def) return [def[0], def[1]]
         return [p[0] + baseOffsetX, p[1] + baseOffsetY]
       })
-      var effLayout = Object.assign({}, layout, { W: worldW, H: worldH, positions: positions, baseOffsetX: baseOffsetX, baseOffsetY: baseOffsetY, contentW: layout.W, contentH: layout.H })
+      // 2026-11-10：node positions 会被平移到世界画布中心；服务器中心也必须加同一偏移，否则单服务器布局会隔半个画布
+      var worldServerCenter = layout.serverCenter ? [layout.serverCenter[0] + baseOffsetX, layout.serverCenter[1] + baseOffsetY] : null
+      var effLayout = Object.assign({}, layout, { W: worldW, H: worldH, positions: positions, baseOffsetX: baseOffsetX, baseOffsetY: baseOffsetY, contentW: layout.W, contentH: layout.H, serverCenter: worldServerCenter })
       function moveNode(key, pos) {
         setMovedLayout(function (prev) {
           var next = Object.assign({}, prev)
