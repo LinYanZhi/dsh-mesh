@@ -1597,6 +1597,12 @@ function deviceLinkState(data, peer, lanMap) {
         }).finally(function () { setBusy(false) })
       }
       useEffect(function () { refresh() }, [])
+      function togglePeer(peer) {
+        setBusy(true); setMsg('')
+        fetch('/api/dsh-mesh/peers/toggle', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: peer.id, disabled: !peer.disabled }) })
+          .then(function (r) { return r.text() }).then(function (text) { try { var j = JSON.parse(text); setMsg(j.ok ? ((peer.disabled ? '已启用 ' : '已禁用 ') + peer.name) : ('操作失败：' + (j.stderr || j.error || '').slice(0, 200))) } catch (e) { setMsg(text.slice(0, 120)) } refresh(); if (props.onChanged) props.onChanged() })
+          .finally(function () { setBusy(false) })
+      }
       function removePeer(peer) {
         if (!window.confirm('从本机移除节点「' + peer.name + '」？\n这会删除本机到它的连接；对方的入站 token 需在下方吊销。')) return
         setBusy(true); setMsg('')
@@ -1620,9 +1626,10 @@ function deviceLinkState(data, peer, lanMap) {
         peers === null ? h('div', { className: 'dm-sub' }, '加载中…') :
           peers.length ? peers.map(function (peer) {
             return h('div', { className: 'dm-node-row', key: peer.id },
-              h('span', { className: 'dm-dot ok' }),
-              h('span', { className: 'dm-node-name' }, peer.name),
+              h('span', { className: 'dm-dot ' + (peer.disabled ? 'muted' : 'ok'), style: peer.disabled ? { opacity: .4 } : undefined }),
+              h('span', { className: 'dm-node-name' }, peer.name + (peer.disabled ? '（已禁用）' : '')),
               h('span', { className: 'dm-node-url' }, maskText(peer.url || '')),
+              h('button', { className: 'dm-btn', disabled: busy, onClick: function () { togglePeer(peer) } }, peer.disabled ? '启用' : '禁用'),
               h('button', { className: 'dm-btn bad', disabled: busy, onClick: function () { removePeer(peer) } }, '移除')
             )
           }) : h('div', { className: 'dm-sub' }, '没有直接配对的节点'),

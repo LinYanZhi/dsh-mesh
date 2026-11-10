@@ -282,6 +282,7 @@ async function main(argv) {
               name: p.name,
               url: p.url,
               certFingerprint: p.certFingerprint,
+              disabled: Boolean(p.disabled),
               addedAt: p.addedAt
             })),
             file: peersPath(home)
@@ -417,6 +418,23 @@ async function main(argv) {
       return 0
     }
 
+    if (sub === 'disable' || sub === 'enable') {
+      const id = argv[2]
+      if (!id) {
+        console.error('usage: node src/cli.js peer disable|enable <id>')
+        return 1
+      }
+      const target = peers.items.find((p) => p.id === id || p.name === id)
+      if (!target) {
+        console.error('unknown peer "' + id + '" — run `node src/cli.js peer list`')
+        return 1
+      }
+      target.disabled = sub === 'disable'
+      savePeers(peers, home)
+      console.log((sub === 'disable' ? 'disabled' : 'enabled') + ' peer "' + target.name + '" (' + target.id + ')')
+      return 0
+    }
+
     if (sub === 'patch') {
       const idArg = argv[2] && !argv[2].startsWith('--') ? argv[2] : undefined
       const wanted = argValue(argv, '--to', argValue(argv, '--peer', idArg))
@@ -425,6 +443,7 @@ async function main(argv) {
         console.error(wanted ? `no paired peer "${wanted}"` : 'no peers yet; run `peer add` first')
         return 1
       }
+      if (peer.disabled) { console.error(`peer "${peer.name}" is disabled`); return 1 }
       const transport = argValue(argv, '--transport', 'streamable-http')
       if (transport !== 'streamable-http' && transport !== 'stdio') {
         console.error(`unknown --transport "${transport}" (streamable-http | stdio)`)
@@ -466,6 +485,10 @@ async function main(argv) {
       if (!peer) {
         const available = peers.items.map((p) => p.name).join(', ') || 'none'
         console.error(target ? `unknown peer "${target}" — paired: ${available}` : `several peers are paired (${available}); pass --to <name>`)
+        return 1
+      }
+      if (peer.disabled) {
+        console.error(`peer "${peer.name}" is disabled; run \`node src/cli.js peer enable ${peer.name}\` first`)
         return 1
       }
       const timeoutMs = Number(argValue(argv, '--timeout-ms', 30000)) || 30000
@@ -517,7 +540,7 @@ async function main(argv) {
       }
     }
 
-    console.error('usage: node src/cli.js peer [list | add --url URL --code CODE [--name NAME] [--ca cert.pem] | import --file <name>.yml [--meta <name>.json] | remove <id> | patch [id] [--transport streamable-http|stdio] | tools [--to NAME] | call <tool> [--to NAME] [--args JSON] | doctor [--to NAME] | bridge --to NAME]')
+    console.error('usage: node src/cli.js peer [list | add --url URL --code CODE [--name NAME] [--ca cert.pem] | import --file <name>.yml [--meta <name>.json] | remove <id> | disable|enable <id> | patch [id] [--transport streamable-http|stdio] | tools [--to NAME] | call <tool> [--to NAME] [--args JSON] | doctor [--to NAME] | bridge --to NAME]')
     return 1
   }
 
@@ -989,6 +1012,7 @@ async function main(argv) {
         console.error(`unknown peer "${peerName}" — run \`node src/cli.js peer list\``)
         return 1
       }
+      if (entry.disabled) { console.error(`peer "${peerName}" is disabled`); return 1 }
       const { probePeer } = await import('./core/cluster.js')
       const { callPeerTool } = await import('./core/peer-client.js')
       const timeoutMs = Number(argValue(argv, '--timeout-ms', 30000))
