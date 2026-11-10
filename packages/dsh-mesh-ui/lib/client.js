@@ -1516,6 +1516,16 @@ function deviceLinkState(data, peer, lanMap) {
           + (ls.httpUp ? "" : "（HTTP 超时，隧道" + (ls.tcpUp ? "通" : "断") + "）")
       }
 
+      // 2026-11-10：点击节点后自动滚动到对应设备卡片，保证卡片完整可见
+      var selectedDeviceRef = useRef(null)
+      useEffect(function () {
+        if (!props.selectedKey || !selectedDeviceRef.current) return
+        var timer = setTimeout(function () {
+          try { selectedDeviceRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' }) } catch (error) { selectedDeviceRef.current.scrollIntoView() }
+        }, 40)
+        return function () { clearTimeout(timer) }
+      }, [props.selectedKey])
+
       var devices = [{
         key: 'local',
         name: nodeDisplay(data.nodeName) + '（本机）',
@@ -1556,7 +1566,7 @@ function deviceLinkState(data, peer, lanMap) {
 
       return h('div', { className: 'dm-devices' },
         devices.map(function (device) {
-          return h('div', { key: device.key, className: 'dm-device' + (props.selectedKey === device.key ? ' selected' : '') },
+          return h('div', { key: device.key, ref: props.selectedKey === device.key ? function (el) { selectedDeviceRef.current = el } : null, className: 'dm-device' + (props.selectedKey === device.key ? ' selected' : '') },
             h('div', { className: 'dm-device-head' },
               h('span', { className: 'dm-dot ' + (device.up ? 'ok' : 'bad') }),
               h('span', { className: 'dm-device-name' }, device.name),
