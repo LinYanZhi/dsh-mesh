@@ -563,10 +563,24 @@ body.light .dm-edge-label { stroke: rgba(255,255,255,.92); }
       var s0 = useState({ scale: 1, x: 0, y: 0 }); var view = s0[0]; var setView = s0[1]
       var s1 = useState(false); var dragging = s1[0]; var setDragging = s1[1]
       // 2026-11-09：三通道筛选（局域网/公网/樱花）
-      var filterState = useState({ lan: true, public: true, sakura: true })
+      // 2026-11-10：筛选状态持久化；刷新/切页面后不再丢。
+      var FILTER_STORE_KEY = 'dsh-mesh-ui.filters.v1'
+      var filterState = useState(function () {
+        try {
+          var saved = JSON.parse(window.localStorage.getItem(FILTER_STORE_KEY) || '{}') || {}
+          return { lan: saved.lan !== false, public: saved.public !== false, sakura: saved.sakura !== false }
+        } catch (_) { return { lan: true, public: true, sakura: true } }
+      })
       var showFilters = filterState[0]
       var setShowFilters = filterState[1]
-      function toggleFilter(k) { setShowFilters(function (prev) { var n = Object.assign({}, prev); n[k] = !n[k]; return n }) }
+      function toggleFilter(k) {
+        setShowFilters(function (prev) {
+          var n = Object.assign({}, prev)
+          n[k] = !n[k]
+          try { window.localStorage.setItem(FILTER_STORE_KEY, JSON.stringify(n)) } catch (_) { /* ignore */ }
+          return n
+        })
+      }
       // fit 用最新布局的 ref（拖拽中不重算视角；只有初始化 / 窗口变化 / ⟲ 重置 / ⤢ 自适应才重算）
       var effRef = useRef(effLayout)
       effRef.current = effLayout
@@ -1412,7 +1426,20 @@ function deviceLinkState(data, peer, lanMap) {
     }
 
     function Details(props) {
-      return h('details', { className: 'dm-details', open: Boolean(props.open) },
+      var storeKey = 'dsh-mesh-ui.details.' + encodeURIComponent(String(props.title || ''))
+      var sOpen = useState(function () {
+        try {
+          var saved = window.localStorage.getItem(storeKey)
+          return saved == null ? Boolean(props.open) : saved === '1'
+        } catch (_) { return Boolean(props.open) }
+      })
+      var open = sOpen[0]; var setOpen = sOpen[1]
+      function onToggle(event) {
+        var next = Boolean(event.currentTarget.open)
+        setOpen(next)
+        try { window.localStorage.setItem(storeKey, next ? '1' : '0') } catch (_) { /* ignore */ }
+      }
+      return h('details', { className: 'dm-details', open: open, onToggle: onToggle },
         h('summary', null, props.title, props.badge != null ? h('span', { className: 'dm-pill muted' }, String(props.badge)) : null),
         h('div', { className: 'dm-body' }, props.children)
       )
