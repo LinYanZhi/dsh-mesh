@@ -29,6 +29,7 @@ const HELP = `dsh-mesh v${MESH_VERSION} — expose this machine to a peer DSH ov
 Usage:
   node src/cli.js serve [--port N] [--bind ADDR]      start the mesh endpoint (config hot-reloads)
   node src/cli.js discover [--timeout-ms N] [--json]  find dsh-mesh nodes on the local network (UDP)
+  node src/cli.js group [show|set <name> [--key SECRET]|clear]  LAN discovery group isolation
   node src/cli.js pair [--host H] [--port N]          print the connection snippet + token for the peer
   node src/cli.js pair --code [--ttl N]                mint a one-time pairing code (default 30 min, max 24 h)
   node src/cli.js peer [list]                          peers this machine can reach (client-side)
@@ -637,7 +638,8 @@ async function main(argv) {
   if (cmd === 'discover') {
     const timeoutMs = Number(argValue(argv, '--timeout-ms', '1800'))
     const port = Number(argValue(argv, '--port', String(LAN_DISCOVERY_PORT)))
-    const nodes = await discoverLan({ timeoutMs: Number.isFinite(timeoutMs) ? timeoutMs : 1800, port })
+    const cfg = loadConfig(home)
+    const nodes = await discoverLan({ timeoutMs: Number.isFinite(timeoutMs) ? timeoutMs : 1800, port, group: cfg.lan?.group || '', groupKey: cfg.lan?.groupKey || '' })
     if (argv.includes('--json')) {
       console.log(JSON.stringify({ ok: true, port, nodes }, null, 2))
     } else if (!nodes.length) {
@@ -646,6 +648,28 @@ async function main(argv) {
       for (const node of nodes) console.log(`${node.node}\t${node.url}\t${node.version || ''}\t${node.address}`)
     }
     return 0
+  }
+
+  if (cmd === 'group') {
+    const sub = argv[1] || 'show'
+    const config = loadConfig(home)
+    if (sub === 'show') {
+      console.log(JSON.stringify({ group: config.lan?.group || '', hasKey: Boolean(config.lan?.groupKey), configPath: configPath(home) }, null, 2))
+      return 0
+    }
+    if (sub === 'set' || sub === 'clear') {
+      const group = sub === 'clear' ? '' : String(argv[2] || '').trim()
+      const key = sub === 'clear' ? '' : String(argValue(argv, '--key', '')).trim()
+      if (sub === 'set' && !group) { console.error('usage: node src/cli.js group set <name> [--key SECRET]'); return 1 }
+      const bak = configPath(home) + '.bak-group-' + Date.now()
+      try { (await import('node:fs')).copyFileSync(configPath(home), bak) } catch { /* first run */ }
+      config.lan = { ...(config.lan || {}), group, groupKey: key }
+      saveConfig(config, home)
+      console.log(JSON.stringify({ ok: true, group, hasKey: Boolean(key), backup: bak }, null, 2))
+      return 0
+    }
+    console.error('usage: node src/cli.js group [show | set <name> [--key SECRET] | clear]')
+    return 1
   }
 
   if (cmd === 'serve') {

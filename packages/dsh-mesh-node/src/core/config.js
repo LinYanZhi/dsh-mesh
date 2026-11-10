@@ -6,7 +6,7 @@ import { readJsonFile } from './util.js'
 import { roleAllow, isRole, inferRole } from './roles.js'
 
 export const MESH_VERSION = '0.17.0'
-export const CONFIG_VERSION = 7
+export const CONFIG_VERSION = 8
 
 /** Defaults for M1 — used only to detect and upgrade an untouched M1 config. */
 const M1_DEFAULT_ALLOW = ['mesh_self', 'fs_read', 'git_status']
@@ -168,6 +168,8 @@ export function defaultConfig() {
       /** TLS terminated inside the node (Sakura TCP tunnels are not encrypted). */
       tls: { enabled: false, cert: '', key: '' }
     },
+    /** LAN discovery isolation: empty group = visible to everyone (backward compatible). */
+    lan: { group: '', groupKey: '' },
     acl: {
       /** Tools a peer may call. Deny-by-default: anything not listed is refused. */
       allow: [...DEFAULT_ALLOW],
@@ -398,6 +400,11 @@ function migrateConfig(raw) {
     if (addedProfiles > 0) notes.push(`hosts[].profileDir: derived for ${addedProfiles} instance(s)`)
     raw.version = 7
     notes.push('config version 6 -> 7 (repair tooling)')
+  }
+  if (Number(raw.version) < 8) {
+    if (raw.lan === undefined) raw.lan = { group: '', groupKey: '' }
+    raw.version = 8
+    notes.push('config version 7 -> 8 (lan.group)')
   }
   // v7.1: 文件/检索工具加入默认 ACL。老默认列表自动补齐；即便 ACL 被小幅自定义过，
   // 只要仍是正常节点 ACL（含 mesh_self + fs_read），也补上这 7 个工具——否则跨机传文件/

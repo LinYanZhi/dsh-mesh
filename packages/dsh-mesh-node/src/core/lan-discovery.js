@@ -1,10 +1,12 @@
 import dgram from 'node:dgram'
+import { createHmac } from 'node:crypto'
 import { networkInterfaces } from 'node:os'
 import { describeCert } from './tls.js'
 import { MESH_VERSION } from './config.js'
 
 export const LAN_DISCOVERY_PORT = Number(process.env.DSH_MESH_LAN_PORT || 8129)
 const SERVICE = 'dsh-mesh'
+function groupProof(groupKey, group) { return groupKey ? createHmac('sha256', groupKey).update('dsh-mesh-lan:' + group).digest('hex') : '' }
 
 function schemeOf(config) {
   return config?.node?.tls?.enabled ? 'https' : 'http'
@@ -56,7 +58,8 @@ function advertisePayload({ home, config, port }) {
     url: `${scheme}://${hostForUrl}:${port}${node.path || '/mcp'}`,
     scheme,
     certFingerprint,
-    version: MESH_VERSION
+    version: MESH_VERSION,
+    group: String(config?.lan?.group || '')
   }
 }
 
@@ -67,6 +70,10 @@ export function startLanResponder({ home, config, port = LAN_DISCOVERY_PORT, log
     try {
       const msg = JSON.parse(buf.toString('utf8'))
       if (msg?.service !== SERVICE || msg.type !== 'discover') return
+      var ownGroup = String(config?.lan?.group || '')
+      if (ownGroup && String(msg.group || '') !== ownGroup) return
+      var ownKey = String(config?.lan?.groupKey || '')
+      if (ownGroup && ownKey && String(msg.proof || '') !== groupProof(ownKey, ownGroup)) return
       const payload = advertisePayload({ home, config, port: Number(config?.node?.port) || 8124 })
       socket.send(JSON.stringify(payload), rinfo.port, rinfo.address)
     } catch {
@@ -77,11 +84,11 @@ export function startLanResponder({ home, config, port = LAN_DISCOVERY_PORT, log
   return { close: () => { try { socket.close() } catch { /* ignore */ } } }
 }
 
-export function discoverLan({ timeoutMs = 1800, port = LAN_DISCOVERY_PORT } = {}) {
+export function discoverLan({ timeoutMs = 1800, port = LAN_DISCOVERY_PORT, group = '', groupKey = '' } = {}) {
   return new Promise((resolve) => {
     const socket = dgram.createSocket({ type: 'udp4', reuseAddr: true })
     const found = new Map()
-    const query = JSON.stringify({ service: SERVICE, type: 'discover', v: 1 })
+    const query = JSON.stringify({ service: SERVICE, type: 'discover', v: 1, group: String(group || ''), proof: groupProof(groupKey, String(group || '')) })
     let done = false
     function finish() {
       if (done) return
