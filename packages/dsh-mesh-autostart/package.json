@@ -1,6 +1,6 @@
 {
   "name": "dsh-mesh-autostart",
-  "version": "0.0.6",
+  "version": "0.0.7",
   "description": "DSH host plugin: supervise a dsh-mesh server (and optional frpc) inside the DSH engine process so it survives engine restarts. Resolves the installed dsh-mesh-node package and fails loud when it is missing.",
   "type": "module",
   "main": "lib/index.js",
@@ -19,7 +19,7 @@
     }
   },
   "dependencies": {
-    "dsh-mesh-node": "0.0.12"
+    "dsh-mesh-node": "0.0.13"
   },
   "peerDependencies": {
     "@deepseek-ai/dsh": ">=0.2.0-rc.2 <0.3.0"

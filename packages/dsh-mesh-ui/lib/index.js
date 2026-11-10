@@ -11,8 +11,10 @@
 //
 // 归宿：reusable（dsh-mesh/plugin/dsh-mesh-ui/lib/）
 
-import { collect, resolveRepo, meshHome } from './collect.js'
+import { collect, resolveRepo, meshHome, run, nodeExec } from './collect.js'
 import { listDelegations, sessionHistory, taskStatus } from './delegations.js'
+import { networkInterfaces } from 'node:os'
+import { join } from 'node:path'
 
 /** Cordis inject 列表：只需要 webServer。 */
 export const inject = ['webServer']
@@ -35,6 +37,32 @@ function writeJson(res, status, body) {
   res.setHeader('content-type', 'application/json; charset=utf-8')
   res.setHeader('cache-control', 'no-store')
   res.end(JSON.stringify(body, null, 2))
+}
+
+function readBody(req, limit = 16 * 1024) {
+  return new Promise((resolve) => {
+    let size = 0
+    const chunks = []
+    req.on('data', (chunk) => {
+      size += chunk.length
+      if (size > limit) { resolve(null); req.destroy(); return }
+      chunks.push(chunk)
+    })
+    req.on('end', () => {
+      try { resolve(JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}')) } catch { resolve(null) }
+    })
+    req.on('error', () => resolve(null))
+  })
+}
+
+function lanIPv4() {
+  const ifaces = networkInterfaces()
+  for (const list of Object.values(ifaces)) {
+    for (const item of list || []) {
+      if (item.family === 'IPv4' && !item.internal && !/^169\.254\./.test(item.address)) return item.address
+    }
+  }
+  return '127.0.0.1'
 }
 
 /**
@@ -158,6 +186,54 @@ export function apply(ctx) {
     }
   }
 
+  async function runCli(args, timeout = 30_000) {
+    if (!state.repo) return { error: 'dsh-mesh-node is not installed', stdout: '', stderr: '' }
+    return run(nodeExec(), [join(state.repo, 'src', 'cli.js'), ...args], { cwd: state.repo, timeout })
+  }
+
+  const lanScanRoute = readonlyRoute('/api/dsh-mesh/lan/scan', async () => {
+    const r = await runCli(['discover', '--json', '--timeout-ms', '1500'], 20_000)
+    if (r.error) return { ok: false, error: r.error, stderr: r.stderr }
+    try {
+      const data = JSON.parse(r.stdout)
+      return { ok: true, localAddress: lanIPv4(), nodes: data.nodes || [] }
+    } catch {
+      return { ok: false, error: 'invalid discover output', stdout: r.stdout, stderr: r.stderr }
+    }
+  })
+
+  const lanCodeRoute = readonlyRoute('/api/dsh-mesh/lan/code', async () => {
+    const host = `${lanIPv4()}:8124`
+    const r = await runCli(['pair', '--code', '--ttl', '600', '--role', 'node', '--host', host])
+    if (r.error) return { ok: false, error: r.error, stderr: r.stderr }
+    try {
+      return { ok: true, ...JSON.parse(r.stdout) }
+    } catch {
+      return { ok: false, error: 'invalid pair output', stdout: r.stdout, stderr: r.stderr }
+    }
+  })
+
+  const lanPairRoute = {
+    kind: 'exact',
+    path: '/api/dsh-mesh/lan/pair',
+    handler: async (req, res) => {
+      if (!isLoopback(req)) return writeJson(res, 403, { ok: false, error: 'forbidden: loopback-only' })
+      if ((req.method || 'GET').toUpperCase() !== 'POST') return writeJson(res, 405, { ok: false, error: 'method not allowed' })
+      const body = await readBody(req)
+      if (!body || typeof body.url !== 'string' || typeof body.code !== 'string') {
+        return writeJson(res, 400, { ok: false, error: 'url and code required' })
+      }
+      const args = ['peer', 'add', '--url', String(body.url), '--code', String(body.code), '--name', String(body.name || 'lan-peer')]
+      if (body.fingerprint) args.push('--fingerprint', String(body.fingerprint))
+      try {
+        const r = await runCli(args)
+        writeJson(res, 200, { ok: !r.error, error: r.error, stdout: r.stdout, stderr: r.stderr })
+      } catch (error) {
+        writeJson(res, 500, { ok: false, error: String(error?.message || error) })
+      }
+    }
+  }
+
   const delegateRoutes = [
     readonlyRoute('/api/dsh-mesh/delegations', async (url) => {
       // 缓存整份列表（与请求的 limit 无关），避免不同 limit 的请求互相污染缓存
@@ -187,6 +263,7 @@ export function apply(ctx) {
 
   ctx.effect(() => {
     const disposeRoute = ctx.webServer.register(route)
+    const disposeLanRoutes = [lanScanRoute, lanCodeRoute, lanPairRoute].map((item) => ctx.webServer.register(item))
     const disposeRoutes = delegateRoutes.map((item) => ctx.webServer.register(item))
     return () => {
       try {
@@ -194,7 +271,7 @@ export function apply(ctx) {
       } catch {
         /* ignore */
       }
-      for (const dispose of disposeRoutes) { try { dispose() } catch { /* ignore */ } }
+      for (const dispose of disposeLanRoutes.concat(disposeRoutes)) { try { dispose() } catch { /* ignore */ } }
       if (typeof disposeRoute === 'function') disposeRoute()
     }
   }, 'dsh-mesh-ui: GET /api/dsh-mesh/status + background refresh')

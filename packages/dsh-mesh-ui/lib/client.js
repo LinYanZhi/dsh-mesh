@@ -1475,6 +1475,61 @@ function deviceLinkState(data, peer, lanMap) {
       )
     }
 
+    // 2026-11-10：局域网首次接入（扫描 / 生成配对码 / 配对）。
+    function LanOnboarding() {
+      var sNodes = useState(null); var nodes = sNodes[0]; var setNodes = sNodes[1]
+      var sBusy = useState(false); var busy = sBusy[0]; var setBusy = sBusy[1]
+      var sMsg = useState(''); var msg = sMsg[0]; var setMsg = sMsg[1]
+      var sCode = useState(''); var code = sCode[0]; var setCode = sCode[1]
+      var sMine = useState(null); var mine = sMine[0]; var setMine = sMine[1]
+
+      function scan() {
+        setBusy(true); setMsg('')
+        fetch('/api/dsh-mesh/lan/scan').then(function (r) { return r.json() }).then(function (j) {
+          if (!j.ok) { setMsg(j.error || '扫描失败'); return }
+          setNodes(j.nodes || [])
+          setMsg((j.nodes || []).length ? '发现 ' + j.nodes.length + ' 个节点' : '没有发现局域网节点（对方需 bind 0.0.0.0 并放行 8124）')
+        }).catch(function (e) { setMsg(String(e.message || e)) }).finally(function () { setBusy(false) })
+      }
+      function myCode() {
+        setBusy(true); setMine(null); setMsg('')
+        fetch('/api/dsh-mesh/lan/code').then(function (r) { return r.json() }).then(function (j) {
+          if (!j.ok) { setMsg(j.error || '生成配对码失败'); return }
+          setMine(j)
+        }).catch(function (e) { setMsg(String(e.message || e)) }).finally(function () { setBusy(false) })
+      }
+      function pairWith(node) {
+        var c = String(code || '').trim()
+        if (!c) { setMsg('先填入对方显示的配对码'); return }
+        setBusy(true); setMsg('')
+        fetch('/api/dsh-mesh/lan/pair', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ url: String(node.url || '').replace(/\/mcp$/, ''), code: c, name: (node.node || 'lan') + '-lan', fingerprint: node.certFingerprint || '' }) })
+          .then(function (r) { return r.json() }).then(function (j) {
+            setMsg(j.ok ? '配对成功：' + (node.node || '') + '，稍后刷新网络' : ('配对失败：' + (j.stderr || j.error || j.stdout || '').slice(0, 300)))
+          }).catch(function (e) { setMsg(String(e.message || e)) }).finally(function () { setBusy(false) })
+      }
+      return h('div', null,
+        h('div', { className: 'dm-lan-row' },
+          h('button', { className: 'dm-btn', disabled: busy, onClick: scan }, busy ? '处理中…' : '扫描局域网'),
+          h('button', { className: 'dm-btn', disabled: busy, onClick: myCode }, '生成我的配对码'),
+          h('span', { className: 'dm-sub' }, '对方的 mesh 需 bind 0.0.0.0；第一次可能需放行 8124')
+        ),
+        msg ? h('div', { className: 'dm-sub', style: { marginTop: 6 } }, msg) : null,
+        mine ? h('div', { className: 'dm-lan-code', style: { marginTop: 8 } }, '配对码 ' + mine.pairingCode + ' · ' + (mine.endpoint || '') + (mine.certFingerprint ? ' · 指纹 ' + mine.certFingerprint : '')) : null,
+        nodes && nodes.length ? h('div', { style: { marginTop: 8 } },
+          nodes.map(function (node, i) {
+            return h('div', { className: 'dm-lan-node', key: i },
+              h('span', { className: 'dm-dot ok' }),
+              h('span', null, (node.node || '?') + ' · ' + (node.url || '').replace('/mcp', '')),
+              h('button', { className: 'dm-btn primary', disabled: busy, onClick: function () { pairWith(node) } }, '用此节点配对')
+            )
+          })
+        ) : null,
+        nodes && nodes.length ? h('div', { className: 'dm-lan-row' },
+          h('input', { placeholder: '对方显示的配对码，如 H5K4-9RXV', value: code, onChange: function (e) { setCode(e.target.value) } })
+        ) : null
+      )
+    }
+
     function MeshStatusSection() {
       var s0 = useState(null); var data = s0[0]; var setData = s0[1]
       var s1 = useState(true); var loading = s1[0]; var setLoading = s1[1]
@@ -1635,6 +1690,11 @@ function deviceLinkState(data, peer, lanMap) {
           refreshHint ? h('span', { className: 'dm-sub' }, refreshHint) : null
         ),
         error ? h('div', { className: 'dm-err' }, error) : null,
+
+        h('details', { className: 'dm-details dm-lan' },
+          h('summary', null, '局域网发现 / 配对（首次使用）'),
+          h(LanOnboarding)
+        ),
 
         h('div', { className: 'dm-body', style: splitW > 0 ? { '--dm-main-w': splitW + 'px' } : undefined },
           h('div', { className: 'dm-pane' },
@@ -2353,6 +2413,13 @@ body[data-ds-dark-theme] .dm-dg-fs-item.active { background:rgba(88,166,255,.28)
 @media (hover:hover) { .dm-width-handle:hover::after { opacity:1; } }
 @media (max-width: 1000px) { .dm-width-handle { display:none; } }
 .dm-body { display:grid; grid-template-columns:minmax(300px, var(--dm-main-w, 62%)) 8px minmax(0,1fr); gap:10px; align-items:start; }
+.dm-lan { border:1px solid rgba(128,128,128,.25); border-radius:12px; padding:10px 12px; background:rgba(128,128,128,.035); }
+.dm-lan-row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-top:8px; }
+.dm-lan input { font:inherit; font-size:12px; padding:5px 8px; border:1px solid rgba(128,128,128,.35); border-radius:7px; background:transparent; color:inherit; min-width:180px; }
+.dm-lan-node { display:flex; gap:8px; align-items:center; border-top:1px solid rgba(128,128,128,.16); padding:7px 0; font-size:12px; }
+.dm-lan-node:first-child { border-top:none; }
+.dm-lan-code { font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:12px; padding:6px 8px; border-radius:8px; background:rgba(88,166,255,.1); border:1px solid rgba(88,166,255,.35); word-break:break-all; }
+
 .dm-pane { min-width:0; display:flex; flex-direction:column; gap:12px; }
 .dm-divider { cursor:col-resize; align-self:stretch; min-height:120px; border-radius:4px; position:relative; }
 .dm-divider::before { content:''; position:absolute; top:0; bottom:0; left:3px; width:1px; background:rgba(128,128,128,.28); }

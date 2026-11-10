@@ -22,11 +22,13 @@ import { runSelftest } from './selftest.js'
 import { buildAll, isAllowed } from './tools/index.js'
 import { postJson } from './core/peer-http.js'
 import { DshWebClient } from './core/ds-web.js'
+import { LAN_DISCOVERY_PORT, startLanResponder, discoverLan } from './core/lan-discovery.js'
 
 const HELP = `dsh-mesh v${MESH_VERSION} — expose this machine to a peer DSH over MCP
 
 Usage:
   node src/cli.js serve [--port N] [--bind ADDR]      start the mesh endpoint (config hot-reloads)
+  node src/cli.js discover [--timeout-ms N] [--json]  find dsh-mesh nodes on the local network (UDP)
   node src/cli.js pair [--host H] [--port N]          print the connection snippet + token for the peer
   node src/cli.js pair --code [--ttl N]                mint a one-time pairing code (default 30 min, max 24 h)
   node src/cli.js peer [list]                          peers this machine can reach (client-side)
@@ -609,6 +611,20 @@ async function main(argv) {
     return removed > 0 ? 0 : 1
   }
 
+  if (cmd === 'discover') {
+    const timeoutMs = Number(argValue(argv, '--timeout-ms', '1800'))
+    const port = Number(argValue(argv, '--port', String(LAN_DISCOVERY_PORT)))
+    const nodes = await discoverLan({ timeoutMs: Number.isFinite(timeoutMs) ? timeoutMs : 1800, port })
+    if (argv.includes('--json')) {
+      console.log(JSON.stringify({ ok: true, port, nodes }, null, 2))
+    } else if (!nodes.length) {
+      console.log('no dsh-mesh node found on LAN (check node.bind=0.0.0.0 + firewall for udp/' + port + ')')
+    } else {
+      for (const node of nodes) console.log(`${node.node}\t${node.url}\t${node.version || ''}\t${node.address}`)
+    }
+    return 0
+  }
+
   if (cmd === 'serve') {
     // 注意：这里**故意不传 secrets** —— 传了 startMeshServer 会把它当固定值，
     // 配对/轮换/吊销就要重启才生效。让 server 自己用 createSecretsLoader 按 mtime 热重载。
@@ -626,14 +642,22 @@ async function main(argv) {
       }
     })
     const config = loadConfig(home)
+    const lanResponder = startLanResponder({
+      home,
+      config,
+      port: LAN_DISCOVERY_PORT,
+      log: { info: (m) => console.error(m), warn: (m) => console.error(m) }
+    })
     console.log(`dsh-mesh listening on ${srv.url}`)
     console.log(`  node   : ${config.node?.name || 'local'}`)
+    console.log(`  lan    : udp/${LAN_DISCOVERY_PORT} (discovery)`)
     console.log(`  config : ${configPath(home)} (hot-reloaded on save)`)
     console.log(`  secrets: ${secretsPath(home)}`)
     console.log(`  audit  : ${auditPath(home)}`)
     console.log(`  health : ${schemeOf(config)}://${config.node.bind || '127.0.0.1'}:${srv.port}/health`)
     const shutdown = async (signal) => {
       console.error(`\n[dsh-mesh] ${signal} received, shutting down`)
+      lanResponder.close()
       await srv.close()
       process.exit(0)
     }
