@@ -24,7 +24,8 @@ function clean(value) {
 function withPrefix(value) {
   const cleaned = clean(value)
   if (!cleaned) return PREFIX.trim()
-  return cleaned.replace(PREFIX_RE, PREFIX)
+  const body = cleaned.replace(PREFIX_RE, '').trim() || '任务'
+  return `${PREFIX}${body}`
 }
 
 /**
