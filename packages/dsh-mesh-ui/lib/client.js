@@ -1457,6 +1457,36 @@ function deviceLinkState(data, peer, lanMap) {
       var verdictState = useState(''); var verdictShown = verdictState[0]; var setVerdictShown = verdictState[1]
       var verdictRef = useRef({ raw: '', streak: 0 })
       var s5 = useState('local'); var selectedKey = s5[0]; var setSelectedKey = s5[1]
+      // 双栏宽度：拖动分隔条调整并记忆，窄屏由 CSS 媒体查询自动堆叠。
+      var dragState = useState(function () {
+        try { var saved = Number(window.localStorage.getItem('dsh-mesh-split-w')); return Number.isFinite(saved) && saved > 0 ? saved : 0 } catch (error) { return 0 }
+      })
+      var splitW = dragState[0]; var setSplitW = dragState[1]
+
+      function startSplit(event) {
+        event.preventDefault()
+        var body = event.currentTarget.parentElement
+        if (!body) return
+        var rect = body.getBoundingClientRect()
+        var startW = splitW > 0 ? splitW : Math.round(rect.width * 0.62)
+        var currentW = startW
+        function onMove(moveEvent) {
+          var width = Math.max(300, Math.min(moveEvent.clientX - rect.left, Math.max(300, rect.width - 360)))
+          currentW = width
+          setSplitW(width)
+        }
+        function onUp() {
+          window.removeEventListener('pointermove', onMove)
+          window.removeEventListener('pointerup', onUp)
+          document.body.style.cursor = ''
+          document.body.style.userSelect = ''
+          try { window.localStorage.setItem('dsh-mesh-split-w', String(currentW)) } catch (error) { /* ignore */ }
+        }
+        document.body.style.cursor = 'col-resize'
+        document.body.style.userSelect = 'none'
+        window.addEventListener('pointermove', onMove)
+        window.addEventListener('pointerup', onUp)
+      }
 
       function load(force) {
         if (!force) {
@@ -1575,23 +1605,30 @@ function deviceLinkState(data, peer, lanMap) {
         ),
         error ? h('div', { className: 'dm-err' }, error) : null,
 
-        h(Viewport, { data: data, layout: computeLayout(1 + filterSelfPeers(dedupePeers(data.peers || []), data.nodeName).length), selectedKey: selectedKey, onSelect: setSelectedKey }),
-        h(InfraPanels, { data: data }),
-        h(DeviceDetails, { data: data, selectedKey: selectedKey }),
-        h(Details, { title: '本机实例', badge: ((data.local && data.local.instances) || []).length, open: true }, h(InstanceList, { data: data })),
-        h(Details, { title: '版本一致性', badge: versions.length ? versions.length + ' 处升级' : '一致' },
-          versions.length
-            ? versions.map(function (item, i) { return h('div', { key: i, className: 'dm-sub', style: { marginTop: 4 } }, '· ' + (typeof item === 'string' ? item : JSON.stringify(item))) })
-            : h('div', { className: 'dm-empty' }, '所有节点/实例版本一致')
-        ),
-        h(Details, { title: '委托台账', badge: (data.delegations && data.delegations.total) || 0 }, h(DelegationTable, { data: data })),
-        h(Details, { title: '告警历史', badge: ((data.alerts && data.alerts.history) || []).length }, h(AlertList, { data: data })),
-        (issues.length || hints.length) ? h(Details, { title: '诊断建议', badge: issues.length + hints.length },
-          h('div', null,
-            issues.slice(0, 6).map(function (issue, i) { return h('div', { key: 'i' + i, className: 'dm-err', style: { marginTop: 3 } }, '· ' + issue) }),
-            hints.slice(0, 6).map(function (hint, i) { return h('div', { key: 'h' + i, className: 'dm-sub', style: { marginTop: 3 } }, '· ' + hint) })
+        h('div', { className: 'dm-body', style: splitW > 0 ? { '--dm-main-w': splitW + 'px' } : undefined },
+          h('div', { className: 'dm-pane' },
+            h(Viewport, { data: data, layout: computeLayout(1 + filterSelfPeers(dedupePeers(data.peers || []), data.nodeName).length), selectedKey: selectedKey, onSelect: setSelectedKey }),
+            h(InfraPanels, { data: data }),
+            h(DeviceDetails, { data: data, selectedKey: selectedKey })
+          ),
+          h('div', { className: 'dm-divider', onPointerDown: startSplit, title: '↔ 拖拽调整左右宽度（双击恢复默认）', onDoubleClick: function () { setSplitW(0); try { window.localStorage.removeItem('dsh-mesh-split-w') } catch (error) { /* ignore */ } } }),
+          h('div', { className: 'dm-pane' },
+            h(Details, { title: '本机实例', badge: ((data.local && data.local.instances) || []).length, open: true }, h(InstanceList, { data: data })),
+            h(Details, { title: '版本一致性', badge: versions.length ? versions.length + ' 处升级' : '一致' },
+              versions.length
+                ? versions.map(function (item, i) { return h('div', { key: i, className: 'dm-sub', style: { marginTop: 4 } }, '· ' + (typeof item === 'string' ? item : JSON.stringify(item))) })
+                : h('div', { className: 'dm-empty' }, '所有节点/实例版本一致')
+            ),
+            h(Details, { title: '委托台账', badge: (data.delegations && data.delegations.total) || 0 }, h(DelegationTable, { data: data })),
+            h(Details, { title: '告警历史', badge: ((data.alerts && data.alerts.history) || []).length }, h(AlertList, { data: data })),
+            (issues.length || hints.length) ? h(Details, { title: '诊断建议', badge: issues.length + hints.length },
+              h('div', null,
+                issues.slice(0, 6).map(function (issue, i) { return h('div', { key: 'i' + i, className: 'dm-err', style: { marginTop: 3 } }, '· ' + issue) }),
+                hints.slice(0, 6).map(function (hint, i) { return h('div', { key: 'h' + i, className: 'dm-sub', style: { marginTop: 3 } }, '· ' + hint) })
+              )
+            ) : null
           )
-        ) : null,
+        ),
         h('div', { className: 'dm-foot' }, '数据源：mesh-health / host status / peer host_self / 委托台账 / 告警历史 · ' + (data.repo || '') + ' · node ' + (data.nodeVersion || '') + ' · ' + REFRESH_MS / 1000 + 's 自动刷新（只读）')
       )
     }
@@ -1807,6 +1844,23 @@ body[data-ds-dark-theme] .dm-dg-fs-item.active { background:rgba(88,166,255,.28)
         h('circle', { cx: 8, cy: 3.2, r: 1.6, fill: 'currentColor', stroke: 'none' }),
         h('circle', { cx: 3.2, cy: 8, r: 1.6, fill: 'currentColor', stroke: 'none' }),
         h('circle', { cx: 12.8, cy: 8, r: 1.6, fill: 'currentColor', stroke: 'none' })
+      )
+    }
+
+    /** 左侧栏「AI 网络」专用图标：中心节点 + 四向设备，和「委托」区分开。 */
+    function networkPanelIcon(props) {
+      var size = (props && props.size) || 16
+      return h('svg', {
+        'data-dsh-panel-entry': 'mesh-network', viewBox: '0 0 16 16', width: size, height: size,
+        fill: 'none', stroke: 'currentColor', strokeWidth: '1.3', strokeLinecap: 'round', 'aria-hidden': 'true',
+        style: { color: 'var(--dsh-brand-color, currentColor)' }
+      },
+        h('path', { d: 'M8 8 L8 2.6 M8 8 L13.4 8 M8 8 L8 13.4 M8 8 L2.6 8', opacity: '.55' }),
+        h('circle', { cx: 8, cy: 8, r: 2.1, fill: 'none', strokeWidth: '1.4' }),
+        h('circle', { cx: 8, cy: 2.6, r: 1.25, fill: 'currentColor', stroke: 'none' }),
+        h('circle', { cx: 13.4, cy: 8, r: 1.25, fill: 'currentColor', stroke: 'none' }),
+        h('circle', { cx: 8, cy: 13.4, r: 1.25, fill: 'currentColor', stroke: 'none' }),
+        h('circle', { cx: 2.6, cy: 8, r: 1.25, fill: 'currentColor', stroke: 'none' })
       )
     }
 
@@ -2252,11 +2306,106 @@ body[data-ds-dark-theme] .dm-dg-fs-item.active { background:rgba(88,166,255,.28)
     // 2026-11-10：AI 网络现在是左侧栏主页面，不再受设置面板的窄容器约束。
     // 主区域自身没有内边距，这里给页面统一留白并限制最大阅读宽度。
     var PAGE_CSS = `
-.dm-page { box-sizing:border-box; width:100%; height:100%; overflow:auto; padding:clamp(16px, 2.2vw, 30px) clamp(18px, 2.6vw, 42px) 36px; }
-.dm-page > .dm-root { width:100%; max-width:1500px; margin:0 auto; }
+.dm-page { box-sizing:border-box; width:100%; height:100%; overflow:hidden; padding:clamp(16px, 2.2vw, 30px) clamp(18px, 2.6vw, 42px) 0; }
+.dm-content-shell { width:100%; height:100%; position:relative; --dm-content-w:920px; }
+.dm-content-scroll { height:100%; overflow:auto; padding-bottom:36px; scrollbar-gutter:stable; }
+.dm-content { width:min(100%, var(--dm-content-w)); max-width:100%; margin:0 auto; box-sizing:border-box; container-type:inline-size; container-name:dm-content; }
+.dm-content > .dm-root { width:100%; max-width:100%; margin:0 auto; }
+/* 与 DSH 对话区一致的宽度手柄：位于内容两侧外 24px，平时隐藏，hover/拖拽显示 2px 渐变线 */
+.dm-width-handle { z-index:0; position:absolute; top:0; bottom:0; cursor:col-resize; width:clamp(0px, calc((100% - var(--dm-content-w)) / 2 - 48px), 10px); }
+.dm-width-handle[data-side="left"] { right:calc(50% + var(--dm-content-w) / 2 + 24px); }
+.dm-width-handle[data-side="right"] { left:calc(50% + var(--dm-content-w) / 2 + 24px); }
+.dm-width-handle::after { content:''; pointer-events:none; opacity:0; position:absolute; top:0; bottom:0; width:2px; border-radius:2px; background:linear-gradient(to bottom, transparent calc(var(--dm-width-handle-pointer-y, 50%) - 36px), var(--dsw-alias-scrollbar-bg-l1, rgba(128,128,128,.55)) calc(var(--dm-width-handle-pointer-y, 50%) - 8px), var(--dsw-alias-scrollbar-bg-l1, rgba(128,128,128,.55)) calc(var(--dm-width-handle-pointer-y, 50%) + 8px), transparent calc(var(--dm-width-handle-pointer-y, 50%) + 36px)); }
+.dm-width-handle[data-side="left"]::after { right:4px; }
+.dm-width-handle[data-side="right"]::after { left:4px; }
+.dm-width-handle[data-dragging]::after { opacity:1; }
+@media (hover:hover) { .dm-width-handle:hover::after { opacity:1; } }
+@media (max-width: 1000px) { .dm-width-handle { display:none; } }
+.dm-body { display:grid; grid-template-columns:minmax(300px, var(--dm-main-w, 62%)) 8px minmax(0,1fr); gap:10px; align-items:start; }
+.dm-pane { min-width:0; display:flex; flex-direction:column; gap:12px; }
+.dm-divider { cursor:col-resize; align-self:stretch; min-height:120px; border-radius:4px; position:relative; }
+.dm-divider::before { content:''; position:absolute; top:0; bottom:0; left:3px; width:1px; background:rgba(128,128,128,.28); }
+.dm-divider:hover::before, .dm-divider:active::before { background:rgba(88,166,255,.7); width:2px; left:2.5px; }
+@container dm-content (max-width: 860px) { .dm-body { grid-template-columns:1fr; } .dm-divider { display:none; } }
 `
     function MeshNetworkPage() {
-      return h('div', { className: 'dm-page' }, h('style', null, PAGE_CSS), h(MeshStatusSection))
+      // 宽度偏好：与 DSH 对话区相同语义——空 = 默认宽度，数字 = 用户拖拽固定值。
+      var prefState = useState(function () {
+        try { var saved = Number(window.localStorage.getItem('dsh-mesh.contentWidth')); return Number.isFinite(saved) && saved > 0 ? saved : 0 } catch (error) { return 0 }
+      })
+      var pref = prefState[0]; var setPref = prefState[1]
+      var shellState = useState(0); var containerW = shellState[0]; var setContainerW = shellState[1]
+      var shellRef = useRef(null)
+
+      useEffect(function () {
+        var el = shellRef.current
+        if (!el) return
+        function measure() { setContainerW(el.clientWidth || 0) }
+        measure()
+        if (typeof ResizeObserver !== 'undefined') {
+          var observer = new ResizeObserver(measure)
+          observer.observe(el)
+          return function () { observer.disconnect() }
+        }
+        window.addEventListener('resize', measure)
+        return function () { window.removeEventListener('resize', measure) }
+      }, [])
+
+      // DSH 对话区公式：默认 clamp(680, 64% 容器, 920)；用户值 [640, 容器-176]。
+      var widthNow = containerW || 920
+      var maxW = Math.max(640, widthNow - 176)
+      var contentW = pref > 0 ? Math.min(Math.max(pref, 640), maxW) : Math.max(680, Math.min(widthNow * 0.64, 920))
+
+      function beginWidthDrag(side, event) {
+        event.preventDefault()
+        var handle = event.currentTarget
+        var shell = handle.closest ? handle.closest('.dm-content-shell') : (handle.parentElement && handle.parentElement.parentElement)
+        if (!shell) return
+        var max = Math.max(640, (shell.clientWidth || 920) - 176)
+        var base = contentW
+        var originX = event.clientX
+        var latest = contentW
+        var firstBox = handle.getBoundingClientRect()
+        handle.style.setProperty('--dm-width-handle-pointer-y', (event.clientY - firstBox.top) + 'px')
+        handle.toggleAttribute('data-dragging', true)
+        document.body.style.cursor = 'col-resize'
+        document.body.style.userSelect = 'none'
+        function onMove(moveEvent) {
+          var dx = moveEvent.clientX - originX
+          var outward = side === 'right' ? dx : -dx
+          // 只有拖拽时才更新高亮位置（与 DSH 一致）；hover 时保持手柄高度的 50%。
+          var box = handle.getBoundingClientRect()
+          handle.style.setProperty('--dm-width-handle-pointer-y', (moveEvent.clientY - box.top) + 'px')
+          // 两侧同时外扩/内收，所以内容宽度变化是手柄位移的 2 倍（与 DSH 一致）。
+          latest = Math.min(Math.max(base + outward * 2, 640), max)
+          setPref(latest)
+        }
+        function onUp() {
+          handle.toggleAttribute('data-dragging', false)
+          window.removeEventListener('pointermove', onMove)
+          window.removeEventListener('pointerup', onUp)
+          document.body.style.cursor = ''
+          document.body.style.userSelect = ''
+          try { window.localStorage.setItem('dsh-mesh.contentWidth', String(latest)) } catch (error) { /* ignore */ }
+        }
+        window.addEventListener('pointermove', onMove)
+        window.addEventListener('pointerup', onUp)
+      }
+      function resetContentWidth() {
+        setPref(0)
+        try { window.localStorage.removeItem('dsh-mesh.contentWidth') } catch (error) { /* ignore */ }
+      }
+
+      return h('div', { className: 'dm-page' },
+        h('style', null, PAGE_CSS),
+        h('div', { className: 'dm-content-shell', ref: shellRef, style: { '--dm-content-w': contentW + 'px' } },
+          h('div', { className: 'dm-width-handle', 'data-side': 'left', title: '拖拽调整内容宽度（双击恢复默认）', onPointerDown: function (event) { beginWidthDrag('left', event) }, onDoubleClick: resetContentWidth }),
+          h('div', { className: 'dm-width-handle', 'data-side': 'right', title: '拖拽调整内容宽度（双击恢复默认）', onPointerDown: function (event) { beginWidthDrag('right', event) }, onDoubleClick: resetContentWidth }),
+          h('div', { className: 'dm-content-scroll' },
+            h('div', { className: 'dm-content', style: { width: 'min(100%, ' + contentW + 'px)' } }, h(MeshStatusSection))
+          )
+        )
+      )
     }
 
     var SECTION = { name: 'settings.section', id: 'dsh-mesh', order: 90, label: 'AI 网络' }
@@ -2327,7 +2476,7 @@ body[data-ds-dark-theme] .dm-dg-fs-item.active { background:rgba(88,166,255,.28)
       // 2026-11-10：AI 网络从「设置」迁到左侧栏独立页面，使用更大的主区域。
       try {
         disposers.push(ctx.slots.inject('sidebar.panellist', function () {
-          return ctx.slots.register({ name: 'sidebar.panellist', id: 'mesh-network', order: 54, label: function () { return 'AI 网络' } }, meshPanelIcon)
+          return ctx.slots.register({ name: 'sidebar.panellist', id: 'mesh-network', order: 54, label: function () { return 'AI 网络' } }, networkPanelIcon)
         }))
         disposers.push(ctx.slots.inject('main', function () {
           return ctx.slots.register({ name: 'main', key: 'mesh-network', inject: function () { return {} } }, MeshNetworkPage)
