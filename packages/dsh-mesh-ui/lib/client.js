@@ -868,9 +868,6 @@ var TRANSPORTS = {
   sakura: { label: '樱花穿透',     short: 'SAK', color: '#a371f7', dash: true }
 }
 var DOWN_COLOR = "rgba(209,75,65,.7)"
-// 各机 DSH 安装形态（实测/档案）
-var DEVICE_DSH = {}
-function dshTypesFor(devKey) { return DEVICE_DSH[peerDeviceKey(devKey)] || [] }
 // LAN peer 判定：-lan 后缀 / 内网 IP / kind=lan（实际数据里 peer-node-lan 的 kind 是 frp）
 function isLanPeer(peer) {
   var t = (peer && peer.tunnel) || {}
@@ -1265,7 +1262,6 @@ function deviceLinkState(data, peer, lanMap) {
     nodes.map(function (node, i) {
       var pos = layout.positions[i]
       var selected = props.selectedKey === node.key
-      var types = dshTypesFor(node.devKey)
       return h('div', {
         key: node.key,
         className: 'dm-card-node compact draggable' + (node.local ? ' local' : '') + (node.up ? '' : ' down') + (selected ? ' selected' : '') + (hoverKey === node.key ? ' hovered' : '') + (dragKey === node.key ? ' dragging' : ''),
@@ -1286,12 +1282,9 @@ function deviceLinkState(data, peer, lanMap) {
         ),
         node.up ? null : h('div', { className: 'dm-offline-row' }, '全部链路不可用' + (node.error ? ' · ' + node.error : '')),
         h('div', { className: 'dm-card-dsh' },
-          (node.ports || []).length
-            ? (node.ports || []).map(function (item, pi) {
-              var typeName = types[pi] || types[types.length - 1] || 'DSH'
-              return h('span', { key: pi, className: 'dm-chip type' + (item.up ? ' run' : ' bad'), title: (item.up ? '在线' : '离线') + ' · ' + typeName + ' 端口 ' + item.port }, typeName + ':' + item.port)
-            })
-            : types.map(function (tp, ti) { return h('span', { key: 't' + ti, className: 'dm-chip type' }, tp) })
+          (node.ports || []).map(function (item, pi) {
+            return h('span', { key: pi, className: 'dm-chip type' + (item.up ? ' run' : ' bad'), title: (item.up ? '在线' : '离线') + ' · DSH 端口 ' + item.port }, 'DSH:' + item.port)
+          })
         )
       )
     }),
