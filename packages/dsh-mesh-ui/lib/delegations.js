@@ -26,53 +26,76 @@ function readJson(file, fallback = null) {
   }
 }
 
-/** 委托列表（本地台账，按更新时间倒序）。 */
+/** 委托列表（本地台账，按更新时间倒序）。
+ *  - 过滤 selftest 污染记录（selftest 曾把测试任务写进真实台账）
+ *  - 活跃任务超过阈值未更新 → displayState=stalled（UI 不再显示无限 loading）
+ */
 export function listDelegations(limit = 50) {
   const data = readJson(join(meshHome(), 'delegations.json'), { tasks: {} })
   const localNode = readJson(join(meshHome(), 'config.json'), {})?.node?.name || ''
-  const tasks = Object.values(data?.tasks || {}).map((task) => {
-    const start = Date.parse(task.createdAt || '')
-    const end = Date.parse(task.updatedAt || '') || Date.now()
-    const from = task.from || ''
-    return {
-      taskId: task.taskId || '',
-      conversationId: task.conversationId || '',
-      sessionId: task.sessionId || '',
-      from,
-      fromLabel: nodeLabel(from),
-      fromIsLocal: Boolean(from) && from === localNode,
-      fromInstance: task.fromInstance || '',
-      node: task.node || '',
-      nodeLabel: nodeLabel(task.node),
-      toIsLocal: Boolean(task.node) && task.node === localNode,
-      instance: task.instance || '',
-      workspace: task.workspace || '',
-      dedicated: Boolean(task.dedicated),
-      state: task.state || 'unknown',
-      startedAt: task.startedAt || '',
-      finishedAt: task.finishedAt || '',
-      isActive: ['working', 'submitted', 'accepted', 'question', 'provisioning', 'running'].indexOf(task.state || '') >= 0,
-      activeFresh: ['working', 'submitted', 'accepted', 'question', 'provisioning', 'running'].indexOf(task.state || '') >= 0 && (Date.now() - Date.parse(task.updatedAt || 0) < 12 * 3600 * 1000),
-      displayAt: task.finishedAt || task.updatedAt || '',
-      policy: task.requestedPolicy || task.policy || '',
-      goal: String(task.goal || ''),
-      createdAt: task.createdAt || '',
-      updatedAt: task.updatedAt || '',
-      durationSec: (() => {
-        if (!Number.isFinite(start)) return null
-        const value = Math.max(0, Math.round((end - start) / 1000))
-        return value > 12 * 3600 ? null : value // 台账 updatedAt 会被轮询刷新，超长值不可信
-      })(),
-      stalledReason: task.stalledReason || '',
-      lastSummary: task.summary || ''
-    }
-  })
+  const ACTIVE_STATES = ['working', 'submitted', 'accepted', 'question', 'provisioning', 'running']
+  // 超过这些时间没有 updatedAt 更新，就认为“疑似失联”（不直接改文件，UI 只展示）
+  const STALE_AFTER_MS = {
+    submitted: 15 * 60 * 1000,
+    accepted: 15 * 60 * 1000,
+    provisioning: 15 * 60 * 1000,
+    working: 60 * 60 * 1000,
+    running: 60 * 60 * 1000,
+    question: 6 * 60 * 60 * 1000
+  }
+  const nowMs = Date.now()
+  const tasks = Object.values(data?.tasks || {})
+    .filter((task) => task && task.from !== 'selftest')
+    .map((task) => {
+      const start = Date.parse(task.createdAt || '')
+      const end = Date.parse(task.updatedAt || '') || nowMs
+      const from = task.from || ''
+      const state = task.state || 'unknown'
+      const isActive = ACTIVE_STATES.indexOf(state) >= 0
+      const updatedMs = Date.parse(task.updatedAt || task.createdAt || '')
+      const ageMs = Number.isFinite(updatedMs) ? nowMs - updatedMs : Infinity
+      const staleAfter = STALE_AFTER_MS[state] ?? 60 * 60 * 1000
+      const staleActive = isActive && ageMs > staleAfter
+      return {
+        taskId: task.taskId || '',
+        conversationId: task.conversationId || '',
+        sessionId: task.sessionId || '',
+        from,
+        fromLabel: nodeLabel(from),
+        fromIsLocal: Boolean(from) && from === localNode,
+        fromInstance: task.fromInstance || '',
+        node: task.node || '',
+        nodeLabel: nodeLabel(task.node),
+        toIsLocal: Boolean(task.node) && task.node === localNode,
+        instance: task.instance || '',
+        workspace: task.workspace || '',
+        dedicated: Boolean(task.dedicated),
+        state,
+        displayState: staleActive ? 'stalled' : state,
+        isActive,
+        staleActive,
+        staleAfterSec: Math.round(staleAfter / 1000),
+        activeFresh: isActive && !staleActive,
+        displayAt: task.finishedAt || task.updatedAt || '',
+        policy: task.requestedPolicy || task.policy || '',
+        goal: String(task.goal || ''),
+        createdAt: task.createdAt || '',
+        updatedAt: task.updatedAt || '',
+        durationSec: (() => {
+          if (!Number.isFinite(start)) return null
+          const value = Math.max(0, Math.round((end - start) / 1000))
+          return value > 12 * 3600 ? null : value // 台账 updatedAt 会被轮询刷新，超长值不可信
+        })(),
+        stalledReason: task.stalledReason || '',
+        lastSummary: task.summary || ''
+      }
+    })
   tasks.sort((a, b) => {
     if (a.activeFresh !== b.activeFresh) return a.activeFresh ? -1 : 1
     return String(b.displayAt || b.updatedAt || '').localeCompare(String(a.displayAt || a.updatedAt || ''))
   })
   const byState = {}
-  for (const task of tasks) byState[task.state] = (byState[task.state] || 0) + 1
+  for (const task of tasks) byState[task.displayState] = (byState[task.displayState] || 0) + 1
   return { total: tasks.length, byState, localNode, tasks: tasks.slice(0, Math.max(1, Math.min(limit, 200))) }
 }
 

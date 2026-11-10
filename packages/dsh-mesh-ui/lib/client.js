@@ -2021,6 +2021,7 @@ body[data-ds-dark-theme] .dm-dg-fs-item.active { background:rgba(88,166,255,.28)
             loading ? h('span', { className: 'dm-dg-loading' }, h('span', { className: 'dm-dg-spin' }), '刷新中') : '刷新')
         ),
         notice ? h('div', { className: 'dm-dg-notice ' + notice.type }, notice.text) : null,
+        selected && selected.staleActive ? h('div', { className: 'dm-dg-notice warn' }, '该任务已超过 ' + Math.round(selected.staleAfterSec / 60) + ' 分钟没有更新，可能已失联；可点「刷新状态」再查对端，或重新发起委托。') : null,
         h('div', { className: 'dm-dg-body', style: { '--dm-dg-list-w': listWidth + 'px' } },
           h('section', { className: 'dm-dg-pane' },
             h('div', { className: 'dm-dg-pane-head' }, '委托列表', h('span', { className: 'dm-dg-sub' }, '(' + visibleTasks.length + (visibleTasks.length !== tasks.length ? '/' + tasks.length : '') + ')')),
@@ -2042,7 +2043,7 @@ body[data-ds-dark-theme] .dm-dg-fs-item.active { background:rgba(88,166,255,.28)
                   key: task.taskId,
                   className: 'dm-dg-row ' + tone + (task.taskId === selectedId ? ' active' : ''),
                   onClick: function () { if (task.taskId !== selectedId) selectTask(task) },
-                  title: task.goal || ''
+                  title: task.staleActive ? '超过 ' + Math.round(task.staleAfterSec / 60) + ' 分钟无更新（疑似失联，可点刷新状态）' : (task.goal || '')
                 },
                   h('div', { className: 'dm-dg-row-top' },
                     task.activeFresh ? h(LoadingSpinner, { size: 12 }) : null,
@@ -2052,7 +2053,7 @@ body[data-ds-dark-theme] .dm-dg-fs-item.active { background:rgba(88,166,255,.28)
                       h('span', { className: 'dm-dg-arrow' }, '→'),
                       h('span', { className: 'dm-dg-to' }, (task.nodeLabel || task.node || '?') + (task.instance ? ' · ' + task.instance : ''))
                     ),
-                    dgChip(task.state),
+                    dgChip(task.displayState || task.state),
                     h('span', { className: 'dm-dg-row-time' }, (task.isActive ? '更新 ' : '完成 ') + dgClock(task.displayAt || task.updatedAt))
                   ),
                   h('div', { className: 'dm-dg-goal' }, task.goal || '(无目标)'),
@@ -2086,7 +2087,7 @@ body[data-ds-dark-theme] .dm-dg-fs-item.active { background:rgba(88,166,255,.28)
                         h('span', { className: 'dm-dg-k' }, '状态'),
                         h('span', { className: 'dm-dg-v' },
                           selected.activeFresh ? h(LoadingSpinner, { size: 13 }) : null,
-                          dgChip(selected.state)
+                          dgChip(selected.displayState || selected.state)
                         )
                       ),
                       kv('委托方', (selected.fromLabel || selected.from || '—') + ((selected.fromIsLocal || (localNode && selected.from === localNode)) ? '（本机）' : '')),

@@ -373,7 +373,7 @@ export function buildDelegate(ctx) {
                 tasks: [...(existing?.tasks || []), taskId]
               }
               return data
-            })
+            }, ctx.home)
           } catch (error) {
             try {
               ctx.log?.warn?.(`delegate registry write failed (task continues): ${error?.message || error}`)
