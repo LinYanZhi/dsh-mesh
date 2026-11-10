@@ -702,7 +702,7 @@ body.light .dm-edge-label { stroke: rgba(255,255,255,.92); }
       return h('div', { className: 'dm-topo-wrap' },
         h('div', { className: 'dm-topbar' },
           h('div', { className: 'dm-filters' },
-            [['lan', '局域网'], ['public', '公网 frps'], ['sakura', '第三方穿透']].map(function (it) {
+            [['lan', '局域网'], ['public', '公网中继'], ['sakura', '第三方穿透']].map(function (it) {
               var tr = TRANSPORTS[it[0]]
               return h('label', { key: it[0], className: 'dm-flt' + (showFilters[it[0]] ? ' on' : ''), style: { '--c': tr.color } },
                 h('input', { type: 'checkbox', checked: showFilters[it[0]], onChange: function () { toggleFilter(it[0]) } }),
@@ -809,7 +809,7 @@ body.light .dm-edge-label { stroke: rgba(255,255,255,.92); }
       var instances = (data.local && data.local.instances) || []
       var localUp = instances.filter(function (x) { return x.up }).length
       // 2026-11-09：樱花账号隧道（PC 端 API 采集，跨设备含手机）
-      var sakuraAccount = (data.tunnels && data.tunnels.sakuraAccount) || null
+      var sakuraAccount = sakuraAccountOf(data)
       if (!groups.length && !direct.length && !sakuraAccount) return null
       return h('div', { className: 'dm-relay' },
         h('div', { className: 'dm-relay-head' },
@@ -881,9 +881,28 @@ function isLanPeer(peer) {
   if (/^(192\.168\.|10\.|172\.(1[6-9]|2[0-9]|3[01])\.)/.test(host)) return true
   return false
 }
+// publicEntry 可能来自机器级 frpc；只有它映射的 localPort 与当前 mesh server 端口一致才属于本节点。
+function publicEntryFor(localTunnel) {
+  var lt = localTunnel || {}
+  var entry = lt.publicEntry || lt.selfHosted
+  if (!entry || !entry.host) return null
+  var nodePort = Number(lt.port)
+  if (nodePort && entry.localPort != null && Number(entry.localPort) !== nodePort) return null
+  return entry
+}
+function tunnelMatchesNode(port) {
+  var nodePort = Number(port)
+  return function (tunnel) {
+    if (!nodePort || tunnel.localPort == null) return true
+    return Number(tunnel.localPort) === nodePort
+  }
+}
 function sakuraAccountOf(data) {
   var acc = data && data.tunnels && data.tunnels.sakuraAccount
-  return acc && acc.available === true ? acc : null
+  if (!acc || acc.available !== true) return null
+  var port = Number(data && data.localTunnel && data.localTunnel.port)
+  if (!port) return acc
+  return Object.assign({}, acc, { tunnels: (acc.tunnels || []).filter(function (x) { return x.localPort == null || Number(x.localPort) === port }) })
 }
 function sakuraTunnelOf(data, devKey) {
   var acc = sakuraAccountOf(data)
@@ -915,9 +934,11 @@ function deviceLinkState(data, peer, lanMap) {
       // 2026-11-10：本机自身也有一条阿里云入口（publicEntry/selfHosted 的 7012），之前漏掉了
       var lt = data.localTunnel || {}
       var selfHost = lt.selfHosted || {}
-      var entry = lt.publicEntry || selfHost || {}
-      var localPort = entry.port || selfHost.port || null
-      var localHost = entry.host || selfHost.host || ''
+      var localPublic = publicEntryFor(lt)
+      if (!localPublic) return null
+      var entry = localPublic
+      var localPort = entry.port || null
+      var localHost = entry.host || ''
       var localKey = peerDeviceKey(data.nodeName)
       var devs = [{ devKey: localKey, name: nodeDisplay(data.nodeName) + "（本机）", up: true, port: localPort, host: localHost }].concat(peers.filter(function (p) { return !isLanPeer(p) }).map(function (p) {
         var tu = p.tunnel || {}
@@ -929,7 +950,7 @@ function deviceLinkState(data, peer, lanMap) {
           h('span', { className: 'dm-device-v' }, (d.up ? '✅ ' : '❌ ') + maskHost(d.host) + ':' + d.port)
         )
       })
-      var tunnelRows = acc ? (acc.tunnels || []).map(function (x, i) {
+      var tunnelRows = acc ? (acc.tunnels || []).filter(tunnelMatchesNode(lt.port)).map(function (x, i) {
         return h('div', { key: 'st' + i, className: 'dm-device-row' },
           h('span', { className: 'dm-device-k' }, (x.deviceKey ? nodeDisplay(peerDeviceKey(x.deviceKey)) : (x.name || '未归类'))),
           h('span', { className: 'dm-device-v' }, (x.online ? '✅ ' : '❌ ') + maskText(x.addr || ''))
@@ -940,7 +961,7 @@ function deviceLinkState(data, peer, lanMap) {
         h('div', { className: 'dm-infra-card' },
           h('div', { className: 'dm-infra-head' },
             h('span', { className: 'dm-dot ok', style: { background: TRANSPORTS.public.color } }),
-            h('span', null, '公网 frps 中转'),
+            h('span', null, '公网中转'),
             h('span', { className: 'dm-sub', style: { marginLeft: 'auto' } }, '自建 frps')
           ),
           h('div', { className: 'dm-sub dm-mono', style: { marginBottom: 4 } }, '隧道 ' + (devs.filter(function (d) { return d.port }).map(function (d) { return d.port }).sort().join(' / ') || '—')),
@@ -962,6 +983,7 @@ function deviceLinkState(data, peer, lanMap) {
     function Topology(props) {
       var data = props.data
       var layout = props.layout
+      var show = props.show || { lan: true, public: true, sakura: true }
       // 2026-11-09-v5：卡片宽度自适应 —— 每次渲染后测量真实尺寸，回传父组件重算布局；
       // 同时把每张卡的实际尺寸给连线用（不同卡片宽窄不同，连线端点贴各自边缘）。
       var cardRefs = useRef({})
@@ -1095,10 +1117,15 @@ function deviceLinkState(data, peer, lanMap) {
   var orderKeys = orderedNodeKeys(data)
   nodes.sort(function (a, b) { return orderKeys.indexOf(a.key) - orderKeys.indexOf(b.key) })
   // 基础设施节点（中转服务器）：阿里云 / 樱花
-  var sakuraAcc = sakuraAccountOf(data)
+  var localPub = publicEntryFor(localTunnel)
+  var hasPublic = Boolean(localPub) || peers.some(function (p) { var pt = p.tunnel || {}; return !isLanPeer(p) && Boolean(pt.host) && (pt.kind === 'frp' || pt.kind === 'wan') })
+  var publicVisible = show.public && hasPublic
+  var sakuraRaw = sakuraAccountOf(data)
+  var sakuraAcc = sakuraRaw ? Object.assign({}, sakuraRaw, { tunnels: (sakuraRaw.tunnels || []).filter(tunnelMatchesNode(localTunnel.port)) }) : null
+  var sakuraVisible = show.sakura && Boolean(sakuraAcc && (sakuraAcc.tunnels || []).length)
   var aliyunPorts = peers.map(function (p) { return isLanPeer(p) ? null : (p.tunnel || {}).port }).filter(Boolean)
   var infra = [
-    { key: 'server-aliyun', transport: 'public', name: '公网 frps 中转', host: '公网地址已隐藏', color: TRANSPORTS.public.color, detail: '隧道 ' + (aliyunPorts.length ? aliyunPorts.sort().join('/') : '—'), up: true },
+    { key: 'server-aliyun', transport: 'public', name: '公网中转', host: '公网地址已隐藏', color: TRANSPORTS.public.color, detail: '隧道 ' + (aliyunPorts.length ? aliyunPorts.sort().join('/') : '—'), up: Boolean(localPub) || hasPublic },
     { key: 'server-sakura', transport: 'sakura', name: '第三方 frps 穿透', host: '公网地址已隐藏', color: TRANSPORTS.sakura.color, detail: sakuraAcc ? (sakuraAcc.online + '/' + sakuraAcc.total + ' 在线') : '未采集', up: Boolean(sakuraAcc) },
   ]
   // 2026-11-09-v8：服务器默认位置贴住扇形最高一排设备（用户要求缩小服务器↔设备的垂直间隔）
@@ -1135,7 +1162,6 @@ function deviceLinkState(data, peer, lanMap) {
       }
 
       // 2026-11-09：三通道连线（设备→阿里云 / 设备→樱花 / 局域网直连）+ 中转服务器卡片 + 筛选
-  var show = props.show || { lan: true, public: true, sakura: true }
   // 2026-11-09：悬浮节点 → 只高亮它的连线并显示完整地址（其它线变淡）
   var hoverState = useState(null)
   var hoverKey = hoverState[0]
@@ -1192,11 +1218,10 @@ function deviceLinkState(data, peer, lanMap) {
   var aliyunSize = infraSizes['server-aliyun'] || { w: 300, h: 90 }
   var sakuraSize = infraSizes['server-sakura'] || { w: 300, h: 90 }
   var infraBoxes = []
-  if (show.public) infraBoxes.push({ x: aliyunPos[0], y: aliyunPos[1], w: aliyunSize.w, h: aliyunSize.h })
-  if (show.sakura) infraBoxes.push({ x: sakuraPos[0], y: sakuraPos[1], w: sakuraSize.w, h: sakuraSize.h })
+  if (publicVisible) infraBoxes.push({ x: aliyunPos[0], y: aliyunPos[1], w: aliyunSize.w, h: aliyunSize.h })
+  if (sakuraVisible) infraBoxes.push({ x: sakuraPos[0], y: sakuraPos[1], w: sakuraSize.w, h: sakuraSize.h })
   if (props.onInfraBounds) props.onInfraBounds(infraBoxes)
   var localKey = peerDeviceKey(data.nodeName)
-  var localPub = localTunnel.publicEntry || localTunnel.selfHosted || null
   var localSak = sakuraTunnelOf(data, localKey)
   // 2026-11-10：LAN 线必须从本机节点出发（排序后 local 可能不在 index 0，之前误连到peer-x）
   var localNodeIdx = 0
@@ -1205,13 +1230,13 @@ function deviceLinkState(data, peer, lanMap) {
     var pa = layout.positions[i]
     if (n.local) {
       // 主机自己的两条上级链路：自建 frps（阿里云） + 本机樱花隧道
-      if (show.public && localPub) svgEls = svgEls.concat(curve('pub-local', pa, aliyunPos, true, TRANSPORTS.public, maskHost(localPub.host) + ':' + localPub.port, sizeOf('local'), aliyunSize, edgeRelated('local', 'server-aliyun')))
-      if (show.sakura && localSak) svgEls = svgEls.concat(curve('sak-local', pa, sakuraPos, localSak.online === true, TRANSPORTS.sakura, maskText(localSak.addr || ''), sizeOf('local'), sakuraSize, edgeRelated('local', 'server-sakura')))
+      if (publicVisible && localPub) svgEls = svgEls.concat(curve('pub-local', pa, aliyunPos, true, TRANSPORTS.public, maskHost(localPub.host) + ':' + localPub.port, sizeOf('local'), aliyunSize, edgeRelated('local', 'server-aliyun')))
+      if (sakuraVisible && localSak) svgEls = svgEls.concat(curve('sak-local', pa, sakuraPos, localSak.online === true, TRANSPORTS.sakura, maskText(localSak.addr || ''), sizeOf('local'), sakuraSize, edgeRelated('local', 'server-sakura')))
       return
     }
     var sizeN = sizeOf(n.key)
-    if (show.public) svgEls = svgEls.concat(curve('pub' + i, pa, aliyunPos, n.publicUp, TRANSPORTS.public, '公网 frps' + ((n.tunnel && n.tunnel.port) ? ':' + n.tunnel.port : ''), sizeN, aliyunSize, edgeRelated(n.key, 'server-aliyun')))
-    if (show.sakura && n.sakuraTunnel) svgEls = svgEls.concat(curve('sak' + i, pa, sakuraPos, n.sakuraUp === true, TRANSPORTS.sakura, maskText(n.sakuraTunnel.addr || ''), sizeN, sakuraSize, edgeRelated(n.key, 'server-sakura')))
+    if (publicVisible && n.tunnel && n.tunnel.host && !isLanPeer(n) && (n.tunnel.kind === 'frp' || n.tunnel.kind === 'wan')) svgEls = svgEls.concat(curve('pub' + i, pa, aliyunPos, n.publicUp, TRANSPORTS.public, maskHost(n.tunnel.host) + ((n.tunnel.port) ? ':' + n.tunnel.port : ''), sizeN, aliyunSize, edgeRelated(n.key, 'server-aliyun')))
+    if (sakuraVisible && n.sakuraTunnel) svgEls = svgEls.concat(curve('sak' + i, pa, sakuraPos, n.sakuraUp === true, TRANSPORTS.sakura, maskText(n.sakuraTunnel.addr || ''), sizeN, sakuraSize, edgeRelated(n.key, 'server-sakura')))
     if (show.lan && n.lanUp) { var lt = n.lanTunnel || {}; var lanAddr = (lt.ip || lt.host || 'LAN') + (lt.port ? ':' + lt.port : ''); svgEls = svgEls.concat(curve('lan' + i, layout.positions[localNodeIdx], pa, n.lanUp, TRANSPORTS.lan, lanAddr, sizeOf('local'), sizeN, edgeRelated('local', n.key))) }
   })
   return h('div', null,
@@ -1247,7 +1272,7 @@ function deviceLinkState(data, peer, lanMap) {
         )
       )
     }),
-    (show.public ? h('div', {
+    (publicVisible ? h('div', {
       key: 'server-aliyun',
       className: 'dm-card-node server' + (infra[0].up ? '' : ' down') + (hoverKey === 'server-aliyun' ? ' hovered' : ''),
       onMouseEnter: function () { setHoverKey('server-aliyun') },
@@ -1263,7 +1288,7 @@ function deviceLinkState(data, peer, lanMap) {
       h('div', { className: 'dm-card-domain' }, infra[0].host),
       h('div', { className: 'dm-card-dsh' }, h('span', { className: 'dm-chip', style: { borderColor: TRANSPORTS.public.color, color: TRANSPORTS.public.color } }, 'frps'), h('span', { className: 'dm-chip' }, infra[0].detail))
     ) : null),
-    (show.sakura ? h('div', {
+    (sakuraVisible ? h('div', {
       key: 'server-sakura',
       className: 'dm-card-node server' + (infra[1].up ? '' : ' down') + (hoverKey === 'server-sakura' ? ' hovered' : ''),
       onMouseEnter: function () { setHoverKey('server-sakura') },
@@ -1296,10 +1321,10 @@ function deviceLinkState(data, peer, lanMap) {
       var running = instances.reduce(function (n, x) { return n + (x.running || 0) }, 0)
       var model = instances.length && instances[0].model ? (instances[0].model.provider || '') + ' / ' + (instances[0].model.model || '') : '—'
       var localTunnelText = null
-      var tunnels = localTunnel.tunnels || []
-      var entry = localTunnel.publicEntry || null
+      var tunnels = (localTunnel.tunnels || []).filter(tunnelMatchesNode(localTunnel.port))
+      var entry = publicEntryFor(localTunnel) || null
       var tunnelNames = tunnels.map(function (x) { return x.name + '→' + maskHost(x.host) + ':' + x.port }).join(' / ')
-      var mainSrc = localTunnel.mainSource || (entry && entry.source === 'self-hosted-frps' ? 'self-hosted' : (entry ? 'sakura' : 'none'))
+      var mainSrc = entry ? (localTunnel.mainSource || (entry.source === 'self-hosted-frps' ? 'self-hosted' : (entry.source === 'sakura' ? 'sakura' : 'none'))) : 'none'
       var entryText = entry && entry.host
         ? maskHost(entry.host) + ':' + entry.port + (mainSrc === 'self-hosted' ? '（自建 frps · 主用）' : (mainSrc === 'sakura' ? '（Sakura · 备用）' : ''))
         : '未配置'
