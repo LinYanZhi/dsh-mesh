@@ -775,14 +775,38 @@ body.light .dm-edge-label { stroke: rgba(255,255,255,.92); }
       for (var m = 0; m < count; m++) for (var n = m + 1; n < count; n++) edges.push([m, n])
       return edges
     }
+    // 2026-11-10：按矩形碰撞检测扩大半径，保证默认布局卡片不重叠
+    function fanHasOverlap(points, cardW, cardH, GAP, hasServer) {
+      var halfW = cardW / 2
+      var halfH = cardH / 2
+      for (var i = 0; i < points.length; i++) {
+        for (var j = i + 1; j < points.length; j++) {
+          if (Math.abs(points[i][0] - points[j][0]) < cardW + GAP && Math.abs(points[i][1] - points[j][1]) < cardH + GAP) return true
+        }
+        if (hasServer) {
+          var serverW = Math.max(cardW * 1.35, 280)
+          var serverH = Math.max(cardH, 96)
+          if (Math.abs(points[i][0]) < (cardW + serverW) / 2 + GAP && Math.abs(points[i][1]) < (cardH + serverH) / 2 + GAP) return true
+        }
+      }
+      return false
+    }
+
     function layoutNodesOnly(count, cardW, cardH, GAP, PAD) {
       var n = Math.max(1, count)
-      var radius = 0
-      if (n > 1) radius = Math.max((cardW + GAP) / (2 * Math.sin(Math.PI / n)), cardH * 1.2)
-      var raw = []
-      for (var i = 0; i < n; i++) {
-        var a = -Math.PI / 2 + (i * 2 * Math.PI) / n
-        raw.push([radius * Math.cos(a), radius * Math.sin(a)])
+      var radius = n > 1 ? Math.max((cardW + GAP) / (2 * Math.sin(Math.PI / n)), cardH * 1.2) : 0
+      function nodePoints(r) {
+        var pts = []
+        for (var i = 0; i < n; i++) {
+          var a = -Math.PI / 2 + (i * 2 * Math.PI) / n
+          pts.push([r * Math.cos(a), r * Math.sin(a)])
+        }
+        return pts
+      }
+      var raw = nodePoints(radius)
+      for (var tries = 0; tries < 240 && n > 1 && fanHasOverlap(raw, cardW, cardH, GAP, false); tries++) {
+        radius += 8
+        raw = nodePoints(radius)
       }
       var minX = Math.min(-cardW / 2, ...raw.map(function (p) { return p[0] - cardW / 2 }))
       var maxX = Math.max(cardW / 2, ...raw.map(function (p) { return p[0] + cardW / 2 }))
@@ -801,10 +825,18 @@ body.light .dm-edge-label { stroke: rgba(255,255,255,.92); }
       var span = (2 * Math.PI) / 3
       var step = n > 1 ? span / (n - 1) : 0
       var radius = Math.max(cardH * 1.7, step > 0 ? (cardW + GAP) * 0.62 / (2 * Math.sin(step / 2)) : cardW * 0.9)
-      var raw = []
-      for (var i = 0; i < n; i++) {
-        var a = Math.PI / 6 + i * step
-        raw.push([radius * Math.cos(a), radius * Math.sin(a)])
+      function fanPoints(r) {
+        var pts = []
+        for (var i = 0; i < n; i++) {
+          var a = Math.PI / 6 + i * step
+          pts.push([r * Math.cos(a), r * Math.sin(a)])
+        }
+        return pts
+      }
+      var raw = fanPoints(radius)
+      for (var tries = 0; tries < 240 && fanHasOverlap(raw, cardW, cardH, GAP, true); tries++) {
+        radius += 8
+        raw = fanPoints(radius)
       }
       var minX = Math.min(-cardW / 2, ...raw.map(function (p) { return p[0] - cardW / 2 }))
       var maxX = Math.max(cardW / 2, ...raw.map(function (p) { return p[0] + cardW / 2 }))
