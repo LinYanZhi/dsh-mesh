@@ -324,6 +324,14 @@ export function apply(ctx) {
     return data
   })
 
+  const transfersRoute = readonlyRoute('/api/dsh-mesh/transfers', async () => {
+    try {
+      const list = JSON.parse(readFileSync(join(meshHome(), 'transfers.json'), 'utf8'))
+      const items = (Array.isArray(list) ? list : []).slice(-60).reverse().map((x) => ({ at: x.at || null, direction: x.direction || '', path: x.path || '', bytes: Number(x.bytes) || 0, totalBytes: Number(x.totalBytes) || 0, peer: x.peer || '' }))
+      return { ok: true, items }
+    } catch { return { ok: true, items: [] } }
+  })
+
   const peersListRoute = readonlyRoute('/api/dsh-mesh/peers', async () => {
     const r = await runCli(['peer', 'list'])
     try { const data = JSON.parse(r.stdout); return { ok: true, peers: (data.peers || []).map((p) => ({ id: p.id, name: p.name, url: p.url, addedAt: p.addedAt || null })) } } catch { return { ok: false, error: 'invalid peer list', stderr: r.stderr } }
@@ -399,7 +407,7 @@ export function apply(ctx) {
 
   ctx.effect(() => {
     const disposeRoute = ctx.webServer.register(route)
-    const disposeLanRoutes = [lanScanRoute, lanCodeRoute, lanCheckRoute, lanPairRoute, federatedRoute, peersListRoute, peersRemoveRoute, peersToggleRoute, tokensListRoute, tokensRevokeRoute].map((item) => ctx.webServer.register(item))
+    const disposeLanRoutes = [lanScanRoute, lanCodeRoute, lanCheckRoute, lanPairRoute, federatedRoute, peersListRoute, peersRemoveRoute, peersToggleRoute, tokensListRoute, tokensRevokeRoute, transfersRoute].map((item) => ctx.webServer.register(item))
     const disposeRoutes = delegateRoutes.map((item) => ctx.webServer.register(item))
     return () => {
       try {

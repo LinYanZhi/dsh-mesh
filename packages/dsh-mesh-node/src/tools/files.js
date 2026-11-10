@@ -21,6 +21,19 @@ const DEFAULT_TRANSFER = {
 function limitsOf(ctx) {
   return { ...DEFAULT_TRANSFER, ...(ctx.getConfig()?.transfer || {}) }
 }
+function transfersPath(home) { return join(home, 'transfers.json') }
+function appendTransfer(ctx, record) {
+  try {
+    const file = transfersPath(ctx.home)
+    let list = []
+    try { list = JSON.parse(readFileSync(file, 'utf8')) } catch { list = [] }
+    if (!Array.isArray(list)) list = []
+    list.push(Object.assign({ at: new Date().toISOString(), peer: ctx.peerId || '' }, record))
+    if (list.length > 200) list = list.slice(-200)
+    writeFileSync(file, JSON.stringify(list, null, 2) + '\n', 'utf8')
+  } catch { /* history is best-effort; never fail a transfer */ }
+}
+
 function usagePath(home) {
   return join(home, 'transfer-usage.json')
 }
@@ -325,6 +338,7 @@ export function buildFiles(ctx) {
         try {
           const read = readSync(fd, buf, 0, buf.length, offset)
           addUsage(ctx.home, read)
+          appendTransfer(ctx, { direction: 'read', path: guarded.abs, offset, bytes: read, totalBytes: size })
           return ok({
             path: guarded.abs,
             sizeBytes: size,
@@ -374,6 +388,7 @@ export function buildFiles(ctx) {
             closeSync(fd)
           }
           addUsage(ctx.home, buf.length)
+          appendTransfer(ctx, { direction: 'write', path: guarded.abs, offset, bytes: buf.length, totalBytes: statSync(guarded.abs).size })
           return ok({ path: guarded.abs, offset, written: buf.length, sizeBytes: statSync(guarded.abs).size })
         } catch (error) {
           return internal(`write failed: ${error?.message || error}`)

@@ -1772,13 +1772,44 @@ function deviceLinkState(data, peer, lanMap) {
       )
     }
 
+    function TransferHistory() {
+      var s = useState(null); var items = s[0]; var setItems = s[1]
+      var b = useState(false); var busy = b[0]; var setBusy = b[1]
+      var m = useState(''); var msg = m[0]; var setMsg = m[1]
+      function refresh() {
+        setBusy(true)
+        jsonFetch('/api/dsh-mesh/transfers').then(function (j) {
+          if (j.ok) setItems(j.items || []); else setMsg(j.error || '读取传输历史失败')
+        }).catch(function (e) { setMsg(String(e.message || e)) }).finally(function () { setBusy(false) })
+      }
+      useEffect(function () { refresh() }, [])
+      function fmtBytes(n) { n = Number(n) || 0; if (n < 1024) return n + ' B'; if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB'; if (n < 1024 * 1024 * 1024) return (n / 1024 / 1024).toFixed(1) + ' MB'; return (n / 1024 / 1024 / 1024).toFixed(2) + ' GB' }
+      return h('div', { className: 'dm-transfers' },
+        h('div', { className: 'dm-lan-row' },
+          h('button', { className: 'dm-btn', disabled: busy, onClick: refresh }, busy ? '读取中…' : '刷新历史'),
+          h('span', { className: 'dm-sub' }, '记录通过 file_read_chunk / file_write_chunk 完成的传输')
+        ),
+        msg ? h('div', { className: 'dm-sub', style: { marginTop: 6 } }, msg) : null,
+        items === null ? h('div', { className: 'dm-sub' }, '加载中…') :
+          items.length ? items.map(function (it, i) {
+            return h('div', { className: 'dm-node-row', key: i },
+              h('span', { className: 'dm-chip ' + (it.direction === 'write' ? 'run' : 'muted') }, it.direction === 'write' ? '写入' : '读取'),
+              h('span', { className: 'dm-node-name' }, String(it.path || '').split(/[\\/]/).pop() || '?'),
+              h('span', { className: 'dm-node-url' }, (it.peer || '本机') + ' · ' + fmtBytes(it.bytes) + (it.totalBytes ? ' / ' + fmtBytes(it.totalBytes) : '')),
+              h('span', { className: 'dm-sub' }, it.at ? new Date(it.at).toLocaleTimeString() : '')
+            )
+          }) : h('div', { className: 'dm-sub' }, '还没有传输记录')
+      )
+    }
+
     // 2026-11-10：局域网首次接入（扫描 / 生成配对码 / 配对）。
-    function LanOnboarding() {
+    function LanOnboarding(props) {
       var sNodes = useState(null); var nodes = sNodes[0]; var setNodes = sNodes[1]
       var sBusy = useState(false); var busy = sBusy[0]; var setBusy = sBusy[1]
       var sMsg = useState(''); var msg = sMsg[0]; var setMsg = sMsg[1]
       var sCode = useState(''); var code = sCode[0]; var setCode = sCode[1]
       var sMine = useState(null); var mine = sMine[0]; var setMine = sMine[1]
+      var sStatus = useState({}); var statuses = sStatus[0]; var setStatuses = sStatus[1]
 
       function lanJson(url, options) {
         return fetch(url, options).then(function (res) {
@@ -1792,9 +1823,16 @@ function deviceLinkState(data, peer, lanMap) {
         lanJson('/api/dsh-mesh/lan/scan').then(function (j) {
           if (!j.ok) { setMsg(j.error || '扫描失败'); return }
           setNodes(j.nodes || [])
-          setMsg((j.nodes || []).length ? '发现 ' + j.nodes.length + ' 个节点' : '没有发现局域网节点（对方需 bind 0.0.0.0 并放行 8124）')
+          setStatuses({})
+          setMsg((j.nodes || []).length ? '发现 ' + j.nodes.length + ' 个节点，正在自动检查链路…' : '没有发现局域网节点（对方需 bind 0.0.0.0 并放行 8124）')
+          ;(j.nodes || []).forEach(function (node, idx) {
+            lanJson('/api/dsh-mesh/lan/check', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ url: String(node.url || '') }) })
+              .then(function (r) { setStatuses(function (prev) { var n = Object.assign({}, prev); n[idx] = r.ok ? 'ok' : 'bad'; return n }); if (r.ok) setMsg('发现 ' + (j.nodes || []).length + ' 个节点 · 链路正常 ' + (node.node || '')) })
+              .catch(function () { setStatuses(function (prev) { var n = Object.assign({}, prev); n[idx] = 'bad'; return n }) })
+          })
         }).catch(function (e) { setMsg(String(e.message || e)) }).finally(function () { setBusy(false) })
       }
+      useEffect(function () { scan() }, [])
       function myCode() {
         setBusy(true); setMine(null); setMsg('')
         lanJson('/api/dsh-mesh/lan/code').then(function (j) {
@@ -1816,7 +1854,8 @@ function deviceLinkState(data, peer, lanMap) {
         setBusy(true); setMsg('')
         lanJson('/api/dsh-mesh/lan/pair', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ url: String(node.url || '').replace(/\/mcp$/, ''), code: c, name: (node.node || 'lan') + '-lan', fingerprint: node.certFingerprint || '' }) })
           .then(function (j) {
-            setMsg(j.ok ? '配对成功：' + (node.node || '') + '，稍后刷新网络' : ('配对失败：' + (j.stderr || j.error || j.stdout || '').slice(0, 300)))
+            setMsg(j.ok ? '配对成功：' + (node.node || '') + '，正在复查链路…' : ('配对失败：' + (j.stderr || j.error || j.stdout || '').slice(0, 300)))
+            if (j.ok) setTimeout(function () { checkNode(node); scan(); if (props.onChanged) props.onChanged() }, 900)
           }).catch(function (e) { setMsg(String(e.message || e)) }).finally(function () { setBusy(false) })
       }
       return h('div', null,
@@ -1830,7 +1869,7 @@ function deviceLinkState(data, peer, lanMap) {
         nodes && nodes.length ? h('div', { style: { marginTop: 8 } },
           nodes.map(function (node, i) {
             return h('div', { className: 'dm-lan-node', key: i },
-              h('span', { className: 'dm-dot ok' }),
+              h('span', { className: 'dm-dot ' + (statuses[i] === 'ok' ? 'ok' : statuses[i] === 'bad' ? 'bad' : 'muted'), title: statuses[i] === 'ok' ? '链路可达' : statuses[i] === 'bad' ? '链路不可达' : '检查中' }),
               h('span', null, (node.node || '?') + ' · ' + (node.url || '').replace('/mcp', '')),
               h('button', { className: 'dm-btn', disabled: busy, onClick: function () { checkNode(node) } }, '检查链路'),
               h('button', { className: 'dm-btn primary', disabled: busy || !String(code || '').trim(), onClick: function () { pairWith(node) } }, '用此节点配对')
@@ -2028,14 +2067,6 @@ function deviceLinkState(data, peer, lanMap) {
         ),
         error ? h('div', { className: 'dm-err' }, error) : null,
 
-        h('details', { className: 'dm-details dm-lan' },
-          h('summary', null, '局域网发现 / 配对（首次使用）'),
-          h(LanOnboarding)
-        ),
-        h(Details, { title: '节点管理', badge: '移除 / 吊销' },
-          h(NodeManager, { onChanged: function () { load(true) } })
-        ),
-
         h('div', { className: 'dm-body', style: splitW > 0 ? { '--dm-main-w': splitW + 'px' } : undefined },
           h('div', { className: 'dm-pane' },
             h(Viewport, { data: data, federated: federated, layout: computeLayout(1 + filterSelfPeers(dedupePeers(data.peers || []), data.nodeName).length), selectedKey: selectedKey, onSelect: setSelectedKey }),
@@ -2044,6 +2075,9 @@ function deviceLinkState(data, peer, lanMap) {
           ),
           h('div', { className: 'dm-divider', onPointerDown: startSplit, title: '↔ 拖拽调整左右宽度（双击恢复默认）', onDoubleClick: function () { setSplitW(0); try { window.localStorage.removeItem('dsh-mesh-split-w') } catch (error) { /* ignore */ } } }),
           h('div', { className: 'dm-pane' },
+            h(Details, { title: '局域网连接', badge: '扫描 / 配对' }, h(LanOnboarding, { onChanged: function () { load(true) } })),
+            h(Details, { title: '节点管理', badge: '移除 / 吊销' }, h(NodeManager, { onChanged: function () { load(true) } })),
+            h(Details, { title: '文件传输', badge: '历史' }, h(TransferHistory)),
             h(Details, { title: '本机实例', badge: ((data.local && data.local.instances) || []).length, open: true }, h(InstanceList, { data: data })),
             h(Details, { title: '版本一致性', badge: versions.length ? versions.length + ' 处升级' : '一致' },
               versions.length

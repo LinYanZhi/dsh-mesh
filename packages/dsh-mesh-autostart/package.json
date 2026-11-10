@@ -19,7 +19,7 @@
     }
   },
   "dependencies": {
-    "dsh-mesh-node": "0.0.17"
+    "dsh-mesh-node": "0.0.18"
   },
   "peerDependencies": {
     "@deepseek-ai/dsh": ">=0.2.0-rc.2 <0.3.0"
