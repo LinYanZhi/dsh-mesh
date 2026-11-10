@@ -1,4 +1,4 @@
-# dsh-mesh-ui: settings-page panel
+# dsh-mesh-ui: left-sidebar AI network page
 - insert:
     - id: dsh-mesh-ui
       name: dsh-mesh-ui

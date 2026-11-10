@@ -119,6 +119,37 @@ function nodeLabel(name) { return NODE_LABELS[String(name || '').toLowerCase()] 
     function clampNum(v, min, max) { return Math.max(min, Math.min(max, v)) }
     // [layout-helpers-end]
     // [relay-helpers-begin] 2026-11-09 架构层：识别公网中转站(frps)与通信方式（纯函数，可单测）
+    // 2026-11-10 隐私：默认不展示公网 IP/域名；局域网/回环地址保留。
+    function isPrivateNetworkHost(raw) {
+      var h = String(raw || '').trim().toLowerCase().replace(/^\[|\]$/g, '')
+      h = h.replace(/^https?:\/\//, '').split('/')[0].replace(/:\d+$/, '')
+      if (!h) return true
+      if (h === 'localhost' || h === '::1' || h === '0.0.0.0' || h === '127.0.0.1') return true
+      if (/(\.local|\.lan|\.home|\.internal)$/.test(h)) return true
+      var m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(h)
+      if (m) {
+        var a = Number(m[1]); var b = Number(m[2])
+        return a === 10 || a === 127 || (a === 192 && b === 168) || (a === 172 && b >= 16 && b <= 31)
+      }
+      return false
+    }
+    function maskHost(raw) {
+      var s = String(raw || '').trim()
+      if (!s) return '—'
+      var port = ''
+      var m = /^(.*):(\d+)$/.exec(s)
+      if (m && m[1].indexOf(']') < 0) { s = m[1]; port = ':' + m[2] }
+      return (isPrivateNetworkHost(s) ? s : '公网地址已隐藏') + port
+    }
+    function maskText(value) {
+      if (typeof value !== 'string') return value
+      return value
+        .replace(/https?:\/\/[^\s"'<>]+/gi, function (u) {
+          try { var x = new URL(u); return isPrivateNetworkHost(x.hostname) ? u : (x.protocol + '//公网地址已隐藏' + (x.port ? ':' + x.port : '')) } catch (e) { return u }
+        })
+        .replace(/\b(?!10\.|192\.168\.|127\.|172\.(?:1[6-9]|2\d|3[01])\.)(?:\d{1,3}\.){3}\d{1,3}\b/g, '公网地址已隐藏')
+        .replace(/\b(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+(?:com|net|org|io|dev|cn|top|xyz|me|cc|app|cloud)(?::\d+)?\b/gi, '公网地址已隐藏')
+    }
     // 判定：同一公网 host 被 >=2 个 peer 使用 → 视为共享中转站；LAN/loopback 不算。
     var RELAY_PUBLIC_KINDS = { wan: 1, frp: 1 }
     function relayGroups(peers) {
@@ -149,12 +180,12 @@ function nodeLabel(name) { return NODE_LABELS[String(name || '').toLowerCase()] 
       if (!host) return { text: '—', short: '—' }
       var relay = relayHosts && relayHosts[host]
       var port = t.port ? ':' + t.port : ''
-      if (relay) return { text: (relay.kind === 'frp' ? '域名穿透' : '自建 frps 中转') + ' · ' + relay.host + port, short: '中转' + (t.port ? ' ' + t.port : '') }
+      if (relay) return { text: (relay.kind === 'frp' ? '域名穿透' : '自建 frps 中转') + ' · ' + maskHost(relay.host) + port, short: '中转' + (t.port ? ' ' + t.port : '') }
       if (t.kind === 'loopback') return { text: '本机回环', short: '本机' }
-      if (t.kind === 'lan') return { text: '局域网直连 · ' + t.host + port, short: 'LAN' }
-      if (t.kind === 'frp') return { text: '公网穿透 · ' + t.host + port, short: '穿透' }
-      if (t.kind === 'wan') return { text: '公网直连 · ' + t.host + port, short: '公网' }
-      return { text: (t.label || t.kind || '未知') + ' · ' + t.host + port, short: t.label || '未知' }
+      if (t.kind === 'lan') return { text: '局域网直连 · ' + maskHost(t.host) + port, short: 'LAN' }
+      if (t.kind === 'frp') return { text: '公网穿透 · ' + maskHost(t.host) + port, short: '穿透' }
+      if (t.kind === 'wan') return { text: '公网直连 · ' + maskHost(t.host) + port, short: '公网' }
+      return { text: (t.label || t.kind || '未知') + ' · ' + maskHost(t.host) + port, short: t.label || '未知' }
     }
     // [relay-helpers-end]
     var W = 560
@@ -643,7 +674,7 @@ body.light .dm-edge-label { stroke: rgba(255,255,255,.92); }
       return h('div', { className: 'dm-topo-wrap' },
         h('div', { className: 'dm-topbar' },
           h('div', { className: 'dm-filters' },
-            [['lan', '局域网'], ['public', '阿里云'], ['sakura', '樱花穿透']].map(function (it) {
+            [['lan', '局域网'], ['public', '公网 frps'], ['sakura', '第三方穿透']].map(function (it) {
               var tr = TRANSPORTS[it[0]]
               return h('label', { key: it[0], className: 'dm-flt' + (showFilters[it[0]] ? ' on' : ''), style: { '--c': tr.color } },
                 h('input', { type: 'checkbox', checked: showFilters[it[0]], onChange: function () { toggleFilter(it[0]) } }),
@@ -767,7 +798,7 @@ body.light .dm-edge-label { stroke: rgba(255,255,255,.92); }
             h('div', { className: 'dm-relay-link' }, h('span', { className: 'dm-relay-line' }), h('span', { className: 'dm-relay-dirlabel' }, '出站')),
             h('div', { className: 'dm-relay-hub' },
               h('div', { className: 'dm-relay-name' }, '公网中转站 · frps'),
-              h('div', { className: 'dm-relay-sub dm-mono' }, g.host),
+              h('div', { className: 'dm-relay-sub dm-mono' }, maskHost(g.host)),
               h('div', { className: 'dm-relay-chips' },
                 ports.map(function (p) { return h('span', { className: 'dm-chip', key: p, title: '隧道入口 :' + p }, ':' + p + ' ×' + g.ports[p]) }),
                 h('span', { className: 'dm-chip ' + (g.up === g.peers.length ? 'run' : 'bad') }, '在线 ' + g.up + '/' + g.peers.length)
@@ -788,8 +819,8 @@ body.light .dm-edge-label { stroke: rgba(255,255,255,.92); }
           h('span', { className: 'dm-k' }, '樱花隧道：'),
           h('span', { className: 'dm-chip ' + (sakuraAccount.online === sakuraAccount.total ? 'run' : 'bad') }, sakuraAccount.online + '/' + sakuraAccount.total + ' 在线'),
           (sakuraAccount.tunnels || []).map(function (t) {
-            return h('span', { className: 'dm-chip ' + (t.online ? 'run' : 'bad'), key: 'st' + t.id, title: (t.nodeName || '') + ' ' + t.addr + (t.online ? '' : '（离线）') },
-              (t.deviceKey || t.name) + ' ' + t.addr)
+            return h('span', { className: 'dm-chip ' + (t.online ? 'run' : 'bad'), key: 'st' + t.id, title: (t.nodeName || '') + ' ' + maskText(t.addr) + (t.online ? '' : '（离线）') },
+              (t.deviceKey || t.name) + ' ' + maskText(t.addr))
           })
         ) : null,
         direct.length ? h('div', { className: 'dm-relay-direct' },
@@ -858,22 +889,22 @@ function deviceLinkState(data, peer, lanMap) {
       var selfHost = lt.selfHosted || {}
       var entry = lt.publicEntry || selfHost || {}
       var localPort = entry.port || selfHost.port || null
-      var localHost = entry.host || selfHost.host || "relay.example.com"
+      var localHost = entry.host || selfHost.host || ''
       var localKey = peerDeviceKey(data.nodeName)
       var devs = [{ devKey: localKey, name: nodeDisplay(data.nodeName) + "（本机）", up: true, port: localPort, host: localHost }].concat(peers.filter(function (p) { return !isLanPeer(p) }).map(function (p) {
         var tu = p.tunnel || {}
-        return { devKey: peerDeviceKey(p.name), name: nodeDisplay(peerDeviceKey(p.name)), up: (tu.probe ? Boolean(tu.probe.up) : Boolean(p.up)), port: tu.port || null, host: tu.host || 'relay.example.com' }
+        return { devKey: peerDeviceKey(p.name), name: nodeDisplay(peerDeviceKey(p.name)), up: (tu.probe ? Boolean(tu.probe.up) : Boolean(p.up)), port: tu.port || null, host: tu.host || '' }
       }))
       var aliyunRows = devs.filter(function (d) { return d.port }).map(function (d) {
         return h('div', { key: d.devKey, className: 'dm-device-row' },
           h('span', { className: 'dm-device-k' }, d.name),
-          h('span', { className: 'dm-device-v' }, (d.up ? '✅ ' : '❌ ') + (d.host || 'relay.example.com') + ':' + d.port)
+          h('span', { className: 'dm-device-v' }, (d.up ? '✅ ' : '❌ ') + maskHost(d.host) + ':' + d.port)
         )
       })
       var tunnelRows = acc ? (acc.tunnels || []).map(function (x, i) {
         return h('div', { key: 'st' + i, className: 'dm-device-row' },
           h('span', { className: 'dm-device-k' }, (x.deviceKey ? nodeDisplay(peerDeviceKey(x.deviceKey)) : (x.name || '未归类'))),
-          h('span', { className: 'dm-device-v' }, (x.online ? '✅ ' : '❌ ') + (x.addr || ''))
+          h('span', { className: 'dm-device-v' }, (x.online ? '✅ ' : '❌ ') + maskText(x.addr || ''))
         )
       }) : null
       if (!aliyunRows.length && !tunnelRows) return null
@@ -881,19 +912,19 @@ function deviceLinkState(data, peer, lanMap) {
         h('div', { className: 'dm-infra-card' },
           h('div', { className: 'dm-infra-head' },
             h('span', { className: 'dm-dot ok', style: { background: TRANSPORTS.public.color } }),
-            h('span', null, '阿里云服务器 · ECS'),
+            h('span', null, '公网 frps 中转'),
             h('span', { className: 'dm-sub', style: { marginLeft: 'auto' } }, '自建 frps')
           ),
-          h('div', { className: 'dm-sub dm-mono', style: { marginBottom: 4 } }, 'relay.example.com · 隧道 ' + (devs.filter(function (d) { return d.port }).map(function (d) { return d.port }).sort().join(' / ') || '—')),
+          h('div', { className: 'dm-sub dm-mono', style: { marginBottom: 4 } }, '隧道 ' + (devs.filter(function (d) { return d.port }).map(function (d) { return d.port }).sort().join(' / ') || '—')),
           aliyunRows
         ),
         acc ? h('div', { className: 'dm-infra-card' },
           h('div', { className: 'dm-infra-head' },
             h('span', { className: 'dm-dot', style: { background: TRANSPORTS.sakura.color } }),
-            h('span', null, '樱花穿透服务器'),
+            h('span', null, '第三方 frps 穿透'),
             h('span', { className: 'dm-sub', style: { marginLeft: 'auto' } }, acc.online + '/' + acc.total + ' 在线')
           ),
-          h('div', { className: 'dm-sub dm-mono', style: { marginBottom: 4 } }, 'relay.example.com / relay.example.com / relay.example.com'),
+          h('div', { className: 'dm-sub dm-mono', style: { marginBottom: 4 } }, '公网地址已隐藏'),
           tunnelRows
         ) : null
       )
@@ -985,7 +1016,7 @@ function deviceLinkState(data, peer, lanMap) {
         var src = localTunnel.mainSource || (entry && entry.source === 'self-hosted-frps' ? 'self-hosted' : '')
         if (entry && entry.host) {
           var tag = src === 'self-hosted' ? '（自建 frps）' : (src === 'sakura' ? '（Sakura 备用）' : '')
-          return entry.host + ':' + entry.port + tag
+          return maskHost(entry.host) + ':' + entry.port + tag
         }
         if (localTunnel.frpRunning) return 'SakuraFrp 已开 · ' + (localTunnel.bind || '?') + ':' + localTunnel.port
         if (localTunnel.port) return '未开穿透 · ' + (localTunnel.bind || '?') + ':' + localTunnel.port
@@ -994,7 +1025,7 @@ function deviceLinkState(data, peer, lanMap) {
       function peerDomain(peer) {
         var t = peer.tunnel || {}
         if (!t.host) return '—'
-        return t.host + (t.port ? ':' + t.port : '') + (t.kind === 'lan' ? '（内网）' : '')
+        return maskHost(t.host) + (t.port ? ':' + t.port : '') + (t.kind === 'lan' ? '（内网）' : '')
       }
 
       // LAN peer 单独收集（dedupe 后可能被更快的 frp 记录覆盖，但 LAN 线仍要画）
@@ -1039,8 +1070,8 @@ function deviceLinkState(data, peer, lanMap) {
   var sakuraAcc = sakuraAccountOf(data)
   var aliyunPorts = peers.map(function (p) { return isLanPeer(p) ? null : (p.tunnel || {}).port }).filter(Boolean)
   var infra = [
-    { key: 'server-aliyun', transport: 'public', name: '阿里云服务器 · ECS', host: 'relay.example.com', color: TRANSPORTS.public.color, detail: '隧道 ' + (aliyunPorts.length ? aliyunPorts.sort().join('/') : '—'), up: true },
-    { key: 'server-sakura', transport: 'sakura', name: '樱花穿透服务器', host: 'relay.example.com / relay.example.com / relay.example.com', color: TRANSPORTS.sakura.color, detail: sakuraAcc ? (sakuraAcc.online + '/' + sakuraAcc.total + ' 在线') : '未采集', up: Boolean(sakuraAcc) },
+    { key: 'server-aliyun', transport: 'public', name: '公网 frps 中转', host: '公网地址已隐藏', color: TRANSPORTS.public.color, detail: '隧道 ' + (aliyunPorts.length ? aliyunPorts.sort().join('/') : '—'), up: true },
+    { key: 'server-sakura', transport: 'sakura', name: '第三方 frps 穿透', host: '公网地址已隐藏', color: TRANSPORTS.sakura.color, detail: sakuraAcc ? (sakuraAcc.online + '/' + sakuraAcc.total + ' 在线') : '未采集', up: Boolean(sakuraAcc) },
   ]
   // 2026-11-09-v8：服务器默认位置贴住扇形最高一排设备（用户要求缩小服务器↔设备的垂直间隔）
   function infraDefaultPos(idx) {
@@ -1146,13 +1177,13 @@ function deviceLinkState(data, peer, lanMap) {
     var pa = layout.positions[i]
     if (n.local) {
       // 主机自己的两条上级链路：自建 frps（阿里云） + 本机樱花隧道
-      if (show.public && localPub) svgEls = svgEls.concat(curve('pub-local', pa, aliyunPos, true, TRANSPORTS.public, localPub.host + ':' + localPub.port, sizeOf('local'), aliyunSize, edgeRelated('local', 'server-aliyun')))
-      if (show.sakura && localSak) svgEls = svgEls.concat(curve('sak-local', pa, sakuraPos, localSak.online === true, TRANSPORTS.sakura, localSak.addr || '', sizeOf('local'), sakuraSize, edgeRelated('local', 'server-sakura')))
+      if (show.public && localPub) svgEls = svgEls.concat(curve('pub-local', pa, aliyunPos, true, TRANSPORTS.public, maskHost(localPub.host) + ':' + localPub.port, sizeOf('local'), aliyunSize, edgeRelated('local', 'server-aliyun')))
+      if (show.sakura && localSak) svgEls = svgEls.concat(curve('sak-local', pa, sakuraPos, localSak.online === true, TRANSPORTS.sakura, maskText(localSak.addr || ''), sizeOf('local'), sakuraSize, edgeRelated('local', 'server-sakura')))
       return
     }
     var sizeN = sizeOf(n.key)
-    if (show.public) svgEls = svgEls.concat(curve('pub' + i, pa, aliyunPos, n.publicUp, TRANSPORTS.public, 'relay.example.com' + ((n.tunnel && n.tunnel.port) ? ':' + n.tunnel.port : ''), sizeN, aliyunSize, edgeRelated(n.key, 'server-aliyun')))
-    if (show.sakura && n.sakuraTunnel) svgEls = svgEls.concat(curve('sak' + i, pa, sakuraPos, n.sakuraUp === true, TRANSPORTS.sakura, n.sakuraTunnel.addr || '', sizeN, sakuraSize, edgeRelated(n.key, 'server-sakura')))
+    if (show.public) svgEls = svgEls.concat(curve('pub' + i, pa, aliyunPos, n.publicUp, TRANSPORTS.public, '公网 frps' + ((n.tunnel && n.tunnel.port) ? ':' + n.tunnel.port : ''), sizeN, aliyunSize, edgeRelated(n.key, 'server-aliyun')))
+    if (show.sakura && n.sakuraTunnel) svgEls = svgEls.concat(curve('sak' + i, pa, sakuraPos, n.sakuraUp === true, TRANSPORTS.sakura, maskText(n.sakuraTunnel.addr || ''), sizeN, sakuraSize, edgeRelated(n.key, 'server-sakura')))
     if (show.lan && n.lanUp) { var lt = n.lanTunnel || {}; var lanAddr = (lt.ip || lt.host || 'LAN') + (lt.port ? ':' + lt.port : ''); svgEls = svgEls.concat(curve('lan' + i, layout.positions[localNodeIdx], pa, n.lanUp, TRANSPORTS.lan, lanAddr, sizeOf('local'), sizeN, edgeRelated('local', n.key))) }
   })
   return h('div', null,
@@ -1239,16 +1270,16 @@ function deviceLinkState(data, peer, lanMap) {
       var localTunnelText = null
       var tunnels = localTunnel.tunnels || []
       var entry = localTunnel.publicEntry || null
-      var tunnelNames = tunnels.map(function (x) { return x.name + '→' + x.host + ':' + x.port }).join(' / ')
+      var tunnelNames = tunnels.map(function (x) { return x.name + '→' + maskHost(x.host) + ':' + x.port }).join(' / ')
       var mainSrc = localTunnel.mainSource || (entry && entry.source === 'self-hosted-frps' ? 'self-hosted' : (entry ? 'sakura' : 'none'))
       var entryText = entry && entry.host
-        ? entry.host + ':' + entry.port + (mainSrc === 'self-hosted' ? '（自建 frps · 主用）' : (mainSrc === 'sakura' ? '（Sakura · 备用）' : ''))
+        ? maskHost(entry.host) + ':' + entry.port + (mainSrc === 'self-hosted' ? '（自建 frps · 主用）' : (mainSrc === 'sakura' ? '（Sakura · 备用）' : ''))
         : '未配置'
       var localTunnelRows = [
         ['入口', entryText],
         ['监听 / frpc', (localTunnel.bind || '?') + ':' + (localTunnel.port || '?') + (localTunnel.tls ? ' (TLS)' : '') + ' · ' + (localTunnel.frpRunning ? 'frpc ×' + (localTunnel.frpcCount || 1) : 'frpc 未运行')]
       ]
-      if (tunnels.length) localTunnelRows.push(['Sakura 备用', tunnels.map(function (x) { return x.host + ':' + x.port }).join(' / ')])
+      if (tunnels.length) localTunnelRows.push(['Sakura 备用', tunnels.map(function (x) { return maskHost(x.host) + ':' + x.port }).join(' / ')])
       if (mainSrc === 'self-hosted' && localTunnel.selfHosted && localTunnel.selfHosted.configPath) localTunnelRows.push(['frpc 配置', localTunnel.selfHosted.configPath])
       var localTunnelAll = tunnelNames
       var memText = hw.memTotalGB ? ((hw.memFreeGB != null ? hw.memFreeGB : '?') + ' / ' + hw.memTotalGB + ' GB') : '—'
@@ -1623,8 +1654,8 @@ function deviceLinkState(data, peer, lanMap) {
             h(Details, { title: '告警历史', badge: ((data.alerts && data.alerts.history) || []).length }, h(AlertList, { data: data })),
             (issues.length || hints.length) ? h(Details, { title: '诊断建议', badge: issues.length + hints.length },
               h('div', null,
-                issues.slice(0, 6).map(function (issue, i) { return h('div', { key: 'i' + i, className: 'dm-err', style: { marginTop: 3 } }, '· ' + issue) }),
-                hints.slice(0, 6).map(function (hint, i) { return h('div', { key: 'h' + i, className: 'dm-sub', style: { marginTop: 3 } }, '· ' + hint) })
+                issues.slice(0, 6).map(function (issue, i) { return h('div', { key: 'i' + i, className: 'dm-err', style: { marginTop: 3 } }, '· ' + maskText(issue)) }),
+                hints.slice(0, 6).map(function (hint, i) { return h('div', { key: 'h' + i, className: 'dm-sub', style: { marginTop: 3 } }, '· ' + maskText(hint)) })
               )
             ) : null
           )
