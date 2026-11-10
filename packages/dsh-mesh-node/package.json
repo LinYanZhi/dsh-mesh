@@ -1,6 +1,6 @@
 {
   "name": "dsh-mesh-node",
-  "version": "0.0.9",
+  "version": "0.0.10",
   "description": "Mesh server for dsh-mesh: expose a machine to peer DSH nodes over MCP/HTTPS, with delegation and optional desktop-control tools.",
   "type": "module",
   "private": false,

@@ -258,7 +258,7 @@ export function buildDelegate(ctx) {
           .string()
           .max(120)
           .optional()
-          .describe('User-owned session title to pin before the first prompt (stops DSH auto-titling). Default: [委托]<first goal line>.')
+          .describe('Name this delegated conversation yourself (short, human-readable). dsh-mesh adds the visual prefix "[委托] " automatically and pins the title so DSH auto-titling cannot overwrite it. If omitted, a fallback derived from the goal is used; prefer supplying one.')
       }),
       handler: async ({ goal, scope, acceptance, conversationId, sessionId, instance, workspace, force, agentPreset, title }) => {
         try {

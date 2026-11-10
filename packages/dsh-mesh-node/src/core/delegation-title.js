@@ -1,16 +1,16 @@
 /**
  * Delegation conversation titles.
  *
- * A delegation must be identifiable in the DSH sidebar even when the peer's
- * model auto-titles the session from the prompt. We set the title ourselves as
- * a user-owned rename before the first prompt; DSH's session-title service pins
- * a user title (automatic revisions stop).
- *
- * Format: `[委托]<goal first line>` — e.g. `[委托]修复登录页`.
+ * The delegating AI names its own task; dsh-mesh only adds the visual prefix
+ * `[委托] ` so delegated conversations are easy to spot in the DSH sidebar.
+ * The title is pinned as a user-owned rename before the first prompt, so DSH's
+ * automatic titling never overwrites the caller's name.
  */
 
-const MAX_TITLE = 48
-const MAX_SNIPPET = 36
+const PREFIX = '[委托] '
+const MAX_TITLE = 64
+const MAX_FALLBACK = 48
+const PREFIX_RE = /^\[委托\]\s*/u
 
 /** Strip control characters DSH's title validation refuses. */
 function clean(value) {
@@ -20,15 +20,23 @@ function clean(value) {
     .trim()
 }
 
+/** Add exactly one `[委托] ` prefix (never duplicate it). */
+function withPrefix(value) {
+  const cleaned = clean(value)
+  if (!cleaned) return PREFIX.trim()
+  return cleaned.replace(PREFIX_RE, PREFIX)
+}
+
 /**
  * Build the title for one delegation.
- * @param goal - full delegation goal (may be multi-line / markdown).
- * @param explicit - caller-supplied title; used verbatim (but normalized).
- * @returns a non-empty title at most ~48 characters.
+ * @param goal - full delegation goal; only used as a fallback when the caller
+ *   did not name the session.
+ * @param explicit - the delegating AI's chosen name, used verbatim inside the prefix.
+ * @returns a non-empty title at most ~64 characters.
  */
 export function delegationTitle(goal, explicit) {
   const wanted = clean(explicit)
-  if (wanted) return wanted.slice(0, MAX_TITLE)
+  if (wanted) return withPrefix(wanted).slice(0, MAX_TITLE)
   const firstLine = String(goal || '')
     .split(/\r?\n/u)
     .map((line) => clean(line))
@@ -39,6 +47,6 @@ export function delegationTitle(goal, explicit) {
     .replace(/[】\]]+$/u, '')
     .replace(/^[-*#>\s]+/u, '')
     .trim()
-  const snippet = stripped.length > MAX_SNIPPET ? `${stripped.slice(0, MAX_SNIPPET)}…` : stripped
-  return clean(`[委托]${snippet || '任务'}`).slice(0, MAX_TITLE)
+  const snippet = stripped.length > MAX_FALLBACK ? `${stripped.slice(0, MAX_FALLBACK)}…` : stripped
+  return withPrefix(snippet || '任务').slice(0, MAX_TITLE)
 }
