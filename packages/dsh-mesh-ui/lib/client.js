@@ -1772,6 +1772,53 @@ function deviceLinkState(data, peer, lanMap) {
       )
     }
 
+    // 2026-11-11：AI 网络使用说明 / 可复制提示词
+    function UsageHelp(props) {
+      return h('div', { className: 'dm-usage' },
+        h('div', { className: 'dm-sub' }, '这里主要看网络状态；具体操作可以直接让 AI 执行，不需要手动记命令。'),
+        h('div', { className: 'dm-usage-row' }, h('span', { className: 'dm-dot ok' }), h('span', null, '绿色：在线；黄色：节点在线但 host bridge 未连接；红色：离线')),
+        h('div', { className: 'dm-usage-row' }, h('span', { className: 'dm-dot warn' }), h('span', null, '局域网配对仍需对方的一次性配对码，不会自动连接')),
+        h('button', { className: 'dm-btn primary', style: { marginTop: 6 }, onClick: props.onOpen }, '查看可以让 AI 做什么')
+      )
+    }
+
+    function HelpSheet(props) {
+      var cp = useState(''); var copied = cp[0]; var setCopied = cp[1]
+      var prompts = [
+        ['检查网络', '检查当前 AI 网络状态，列出离线节点、host bridge 未连接原因和可执行的修复建议。'],
+        ['委托任务', '委托peer-x检查当前定时任务和日志，汇总异常后汇报，不要重启 3081。'],
+        ['传文件', '把本机文件传到peer-x指定目录，分块传输，传完用 sha256 校验并告诉我结果。'],
+        ['局域网', '扫描局域网节点，自动检查链路；如果我要配对，先让我生成/输入一次性配对码。'],
+        ['更新节点', '把peer-x的 dsh-mesh 插件更新到最新版本，更新前备份，完成后验证三实例和定时任务。']
+      ]
+      function copy(text) {
+        try { navigator.clipboard && navigator.clipboard.writeText(text) } catch (_) {}
+        setCopied(text); setTimeout(function () { setCopied('') }, 1500)
+      }
+      return h('div', { className: 'dm-help-overlay', onClick: props.onClose },
+        h('div', { className: 'dm-help-card', onClick: function (e) { e.stopPropagation() } },
+          h('div', { className: 'dm-help-head' },
+            h('span', { className: 'dm-help-title' }, 'AI 网络 · 使用说明'),
+            h('button', { className: 'dm-btn', onClick: props.onClose }, '关闭')
+          ),
+          h('div', { className: 'dm-help-section' },
+            h('div', { className: 'dm-help-h' }, '可以直接让 AI 做的事'),
+            h('div', { className: 'dm-sub' }, '下面只是示例；实际直接把目标/路径/节点说清楚即可。')
+          ),
+          prompts.map(function (p, i) {
+            return h('div', { className: 'dm-help-prompt', key: i },
+              h('div', { className: 'dm-help-prompt-head' }, h('b', null, p[0]), h('button', { className: 'dm-btn', onClick: function () { copy(p[1]) } }, copied === p[1] ? '已复制' : '复制')),
+              h('div', { className: 'dm-sub' }, p[1])
+            )
+          }),
+          h('div', { className: 'dm-help-section' },
+            h('div', { className: 'dm-help-h' }, '边界'),
+            h('div', { className: 'dm-sub' }, '跨机写入默认受限；文件写入需要目标节点 ACL 允许。配对码不要发给不可信节点；关闭公网地址只影响显示，不改变实际链路。')
+          )
+        )
+      )
+    }
+
     function TransferHistory() {
       var s = useState(null); var items = s[0]; var setItems = s[1]
       var b = useState(false); var busy = b[0]; var setBusy = b[1]
@@ -1897,6 +1944,7 @@ function deviceLinkState(data, peer, lanMap) {
       var verdictState = useState(''); var verdictShown = verdictState[0]; var setVerdictShown = verdictState[1]
       var verdictRef = useRef({ raw: '', streak: 0 })
       var s5 = useState('local'); var selectedKey = s5[0]; var setSelectedKey = s5[1]
+      var sHelp = useState(false); var helpOpen = sHelp[0]; var setHelpOpen = sHelp[1]
       var sPublic = useState(function () {
         try { return window.localStorage.getItem('dsh-mesh.show-public-addresses') === '1' } catch (error) { return false }
       })
@@ -2062,10 +2110,13 @@ function deviceLinkState(data, peer, lanMap) {
           ),
           h('a', { className: 'dm-btn', href: API, target: '_blank', rel: 'noreferrer', style: { textDecoration: 'none' } }, '原始 JSON'),
           h('button', { className: 'dm-btn', onClick: copyJson }, copied || '复制诊断'),
+          h('button', { className: 'dm-btn', onClick: function () { setHelpOpen(true) } }, '使用说明'),
           h('button', { className: 'dm-btn primary', onClick: function () { load(true) }, title: '立即采集一次并等待新快照（8s 冷却）' }, loading ? '采集中…' : '刷新'),
           refreshHint ? h('span', { className: 'dm-sub' }, refreshHint) : null
         ),
         error ? h('div', { className: 'dm-err' }, error) : null,
+
+        helpOpen ? h(HelpSheet, { onClose: function () { setHelpOpen(false) } }) : null,
 
         h('div', { className: 'dm-body', style: splitW > 0 ? { '--dm-main-w': splitW + 'px' } : undefined },
           h('div', { className: 'dm-pane' },
@@ -2075,6 +2126,7 @@ function deviceLinkState(data, peer, lanMap) {
           ),
           h('div', { className: 'dm-divider', onPointerDown: startSplit, title: '↔ 拖拽调整左右宽度（双击恢复默认）', onDoubleClick: function () { setSplitW(0); try { window.localStorage.removeItem('dsh-mesh-split-w') } catch (error) { /* ignore */ } } }),
           h('div', { className: 'dm-pane' },
+            h(Details, { title: '使用说明', badge: 'AI 能做什么', open: true }, h(UsageHelp, { onOpen: function () { setHelpOpen(true) } })),
             h(Details, { title: '局域网连接', badge: '扫描 / 配对' }, h(LanOnboarding, { onChanged: function () { load(true) } })),
             h(Details, { title: '节点管理', badge: '移除 / 吊销' }, h(NodeManager, { onChanged: function () { load(true) } })),
             h(Details, { title: '文件传输', badge: '历史' }, h(TransferHistory)),
@@ -2809,6 +2861,16 @@ body[data-ds-dark-theme] .dm-dg-fs-item.active { background:rgba(88,166,255,.28)
 .dm-node-row:first-child { border-top:none; }
 .dm-node-name { font-weight:600; min-width:80px; }
 .dm-node-url { opacity:.6; font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:11px; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.dm-usage { display:flex; flex-direction:column; gap:5px; font-size:12px; }
+.dm-usage-row { display:flex; align-items:center; gap:7px; }
+.dm-help-overlay { position:fixed; inset:0; background:rgba(0,0,0,.55); z-index:9999; display:flex; align-items:center; justify-content:center; padding:24px; }
+.dm-help-card { width:min(760px,100%); max-height:86vh; overflow:auto; background:#161a20; color:#d8dee9; border:1px solid rgba(128,128,128,.3); border-radius:14px; padding:16px 18px; box-shadow:0 24px 80px rgba(0,0,0,.55); }
+.dm-help-head { display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:12px; }
+.dm-help-title { font-weight:700; font-size:15px; }
+.dm-help-section { margin-top:12px; }
+.dm-help-h { font-weight:650; font-size:12.5px; margin-bottom:4px; }
+.dm-help-prompt { border-top:1px solid rgba(128,128,128,.16); padding:9px 0; }
+.dm-help-prompt-head { display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:3px; }
 .dm-btn.bad { border-color:rgba(209,75,65,.55); color:#d14b41; }
 
 .dm-card-node.indirect { opacity:.62; border-style:dashed; border-color:rgba(128,128,128,.45); background:rgba(128,128,128,.03); }
