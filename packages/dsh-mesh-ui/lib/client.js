@@ -1529,9 +1529,16 @@ function deviceLinkState(data, peer, lanMap) {
       var sCode = useState(''); var code = sCode[0]; var setCode = sCode[1]
       var sMine = useState(null); var mine = sMine[0]; var setMine = sMine[1]
 
+      function lanJson(url, options) {
+        return fetch(url, options).then(function (res) {
+          return res.text().then(function (text) {
+            try { return JSON.parse(text) } catch (error) { return { ok: false, error: '此实例的 dsh-mesh-ui 服务端还是旧版（重启 DSH 后可用）：' + text.slice(0, 120) } }
+          })
+        })
+      }
       function scan() {
         setBusy(true); setMsg('')
-        fetch('/api/dsh-mesh/lan/scan').then(function (r) { return r.json() }).then(function (j) {
+        lanJson('/api/dsh-mesh/lan/scan').then(function (j) {
           if (!j.ok) { setMsg(j.error || '扫描失败'); return }
           setNodes(j.nodes || [])
           setMsg((j.nodes || []).length ? '发现 ' + j.nodes.length + ' 个节点' : '没有发现局域网节点（对方需 bind 0.0.0.0 并放行 8124）')
@@ -1539,17 +1546,25 @@ function deviceLinkState(data, peer, lanMap) {
       }
       function myCode() {
         setBusy(true); setMine(null); setMsg('')
-        fetch('/api/dsh-mesh/lan/code').then(function (r) { return r.json() }).then(function (j) {
+        lanJson('/api/dsh-mesh/lan/code').then(function (j) {
           if (!j.ok) { setMsg(j.error || '生成配对码失败'); return }
           setMine(j)
         }).catch(function (e) { setMsg(String(e.message || e)) }).finally(function () { setBusy(false) })
+      }
+      function checkNode(node) {
+        setBusy(true); setMsg('')
+        lanJson('/api/dsh-mesh/lan/check', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ url: String(node.url || '') }) })
+          .then(function (j) {
+            if (!j.ok) { setMsg('链路不可达：' + (j.error || 'unknown')); return }
+            setMsg('链路可达：' + j.host + ':' + j.port + ' · TCP ok · ' + j.latencyMs + 'ms' + (j.tls && j.tls.ok ? ' · TLS ok' : ''))
+          }).catch(function (e) { setMsg(String(e.message || e)) }).finally(function () { setBusy(false) })
       }
       function pairWith(node) {
         var c = String(code || '').trim()
         if (!c) { setMsg('先填入对方显示的配对码'); return }
         setBusy(true); setMsg('')
-        fetch('/api/dsh-mesh/lan/pair', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ url: String(node.url || '').replace(/\/mcp$/, ''), code: c, name: (node.node || 'lan') + '-lan', fingerprint: node.certFingerprint || '' }) })
-          .then(function (r) { return r.json() }).then(function (j) {
+        lanJson('/api/dsh-mesh/lan/pair', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ url: String(node.url || '').replace(/\/mcp$/, ''), code: c, name: (node.node || 'lan') + '-lan', fingerprint: node.certFingerprint || '' }) })
+          .then(function (j) {
             setMsg(j.ok ? '配对成功：' + (node.node || '') + '，稍后刷新网络' : ('配对失败：' + (j.stderr || j.error || j.stdout || '').slice(0, 300)))
           }).catch(function (e) { setMsg(String(e.message || e)) }).finally(function () { setBusy(false) })
       }
@@ -1566,6 +1581,7 @@ function deviceLinkState(data, peer, lanMap) {
             return h('div', { className: 'dm-lan-node', key: i },
               h('span', { className: 'dm-dot ok' }),
               h('span', null, (node.node || '?') + ' · ' + (node.url || '').replace('/mcp', '')),
+              h('button', { className: 'dm-btn', disabled: busy, onClick: function () { checkNode(node) } }, '检查链路'),
               h('button', { className: 'dm-btn primary', disabled: busy, onClick: function () { pairWith(node) } }, '用此节点配对')
             )
           })

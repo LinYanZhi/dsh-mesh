@@ -6,6 +6,10 @@
 
 > Status: **0.0.1 — early preview**. APIs and package layout may change. Issues/PRs welcome.
 
+![AI network topology](docs/images/ai-network.png)
+
+*AI 网络左侧栏页面：拓扑、节点健康、链路与委托。公网 IP/域名默认隐藏；局域网地址可显示。*
+
 ## Why / 为什么
 
 一台机器上的 AI 看不到你另一台电脑的窗口、文件和应用。dsh-mesh 让每一台装了 DSH 的设备成为网络里的一个**对等节点**：
@@ -21,8 +25,18 @@
 |---|---|---|
 | [`dsh-mesh-node`](https://www.npmjs.com/package/dsh-mesh-node) | Mesh server: exposes a machine to peers over MCP/HTTPS, with delegation + optional desktop-control tools | `npm i -g dsh-mesh-node` |
 | [`dsh-mesh-host`](https://www.npmjs.com/package/dsh-mesh-host) | DSH host-side bridge: lets the mesh server drive local sessions/tools | `dsh plugin --profile web add dsh-mesh-host` |
-| [`dsh-mesh-ui`](https://www.npmjs.com/package/dsh-mesh-ui) | Settings-page panel: AI network topology, peer health, delegation list | `dsh plugin --profile web add dsh-mesh-ui` |
+| [`dsh-mesh-ui`](https://www.npmjs.com/package/dsh-mesh-ui) | DSH left-sidebar AI network page: topology, peer health, LAN onboarding, delegation list | `dsh plugin --profile web add dsh-mesh-ui` |
 | [`dsh-mesh-autostart`](https://www.npmjs.com/package/dsh-mesh-autostart) | Keeps the mesh server alive across DSH engine restarts (useful on phone/desktop apps) | `dsh plugin --profile web add dsh-mesh-autostart` |
+
+## AI 网络界面 / AI network UI
+
+`dsh-mesh-ui` 现在是一个**左侧栏页面**（不再挤在设置页）：
+
+- **拓扑图**：节点、链路、延迟、版本一致性；可拖拽内容宽度、分栏和画布。
+- **局域网发现 / 配对**：扫描同网段节点 → 生成/输入一次性配对码 → 直接配对，不需要 frp、套餐或公网服务器。
+- **链路检查**：对发现的节点一键测试 TCP/TLS 连通性和延迟。
+- **隐私**：公网 IP/域名默认显示为「公网地址已隐藏」；页头「显示公网地址」开关可手动展开，选择会记忆。
+- **局域网优先**：同一局域网只改 `node.bind=0.0.0.0` 即可；跨公网才需要 relay/frps。
 
 ## How it works / 架构
 
@@ -61,7 +75,7 @@
 ```
 packages/dsh-mesh-node/        mesh server (MCP/HTTPS, tools, delegation)
 packages/dsh-mesh-host/        DSH host bridge plugin
-packages/dsh-mesh-ui/          settings-page panel
+packages/dsh-mesh-ui/          DSH left-sidebar AI network page + LAN onboarding
 packages/dsh-mesh-autostart/   engine-restart supervisor plugin
 tools/                         helper scripts (PC session-0 helper, phone kit, ops)
 docs/                          architecture notes

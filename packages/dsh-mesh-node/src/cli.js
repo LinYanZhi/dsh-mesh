@@ -642,15 +642,17 @@ async function main(argv) {
       }
     })
     const config = loadConfig(home)
-    const lanResponder = startLanResponder({
+    const lanResponder = argv.includes('--no-lan-discovery')
+      ? { close: () => {} }
+      : startLanResponder({
       home,
       config,
       port: LAN_DISCOVERY_PORT,
-      log: { info: (m) => console.error(m), warn: (m) => console.error(m) }
-    })
+        log: { info: (m) => console.error(m), warn: (m) => console.error(m) }
+      })
     console.log(`dsh-mesh listening on ${srv.url}`)
     console.log(`  node   : ${config.node?.name || 'local'}`)
-    console.log(`  lan    : udp/${LAN_DISCOVERY_PORT} (discovery)`)
+    if (!argv.includes('--no-lan-discovery')) console.log(`  lan    : udp/${LAN_DISCOVERY_PORT} (discovery)`)
     console.log(`  config : ${configPath(home)} (hot-reloaded on save)`)
     console.log(`  secrets: ${secretsPath(home)}`)
     console.log(`  audit  : ${auditPath(home)}`)

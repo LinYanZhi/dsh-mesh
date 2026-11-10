@@ -15,7 +15,7 @@ dsh plugin --profile web add dsh-mesh-host dsh-mesh-ui dsh-mesh-autostart
 # 3. verify package files landed
 ls ~/.dsh/profiles/web/node_modules | grep dsh-mesh
 
-# 4. restart the DSH instance (ask the user first), then check Settings → AI 网络
+# 4. restart the DSH instance (ask the user first), then check the left-sidebar **AI 网络** page
 
 # 5. optional mesh server
 npm i -g dsh-mesh-node
@@ -65,7 +65,7 @@ dsh-mesh host status            # host bridge alive inside DSH
 dsh-mesh host tools --instance dsh0
 ```
 
-Web UI check: Settings → **AI 网络** panel visible, no console errors. The server-side route `GET /api/dsh-mesh/status` on the DSH web port should return JSON with `"ok": true`.
+Web UI check: left-sidebar **AI 网络** page visible, LAN onboarding card opens, no console errors. The server-side route `GET /api/dsh-mesh/status` on the DSH web port should return JSON with `"ok": true`.
 
 ## Repo conventions
 

@@ -14,7 +14,10 @@
 import { collect, resolveRepo, meshHome, run, nodeExec } from './collect.js'
 import { listDelegations, sessionHistory, taskStatus } from './delegations.js'
 import { networkInterfaces } from 'node:os'
+import net from 'node:net'
+import tls from 'node:tls'
 import { join } from 'node:path'
+import { readFileSync } from 'node:fs'
 
 /** Cordis inject 列表：只需要 webServer。 */
 export const inject = ['webServer']
@@ -186,6 +189,10 @@ export function apply(ctx) {
     }
   }
 
+  function meshPort() {
+    try { return Number(JSON.parse(readFileSync(join(meshHome(), 'config.json'), 'utf8')).node?.port) || 8124 } catch { return 8124 }
+  }
+
   async function runCli(args, timeout = 30_000) {
     if (!state.repo) return { error: 'dsh-mesh-node is not installed', stdout: '', stderr: '' }
     return run(nodeExec(), [join(state.repo, 'src', 'cli.js'), ...args], { cwd: state.repo, timeout })
@@ -203,7 +210,7 @@ export function apply(ctx) {
   })
 
   const lanCodeRoute = readonlyRoute('/api/dsh-mesh/lan/code', async () => {
-    const host = `${lanIPv4()}:8124`
+    const host = `${lanIPv4()}:${meshPort()}`
     const r = await runCli(['pair', '--code', '--ttl', '600', '--role', 'node', '--host', host])
     if (r.error) return { ok: false, error: r.error, stderr: r.stderr }
     try {
@@ -212,6 +219,42 @@ export function apply(ctx) {
       return { ok: false, error: 'invalid pair output', stdout: r.stdout, stderr: r.stderr }
     }
   })
+
+
+  const lanCheckRoute = {
+    kind: 'exact',
+    path: '/api/dsh-mesh/lan/check',
+    handler: async (req, res) => {
+      if (!isLoopback(req)) return writeJson(res, 403, { ok: false, error: 'forbidden: loopback-only' })
+      if ((req.method || 'GET').toUpperCase() !== 'POST') return writeJson(res, 405, { ok: false, error: 'method not allowed' })
+      const body = await readBody(req)
+      if (!body || typeof body.url !== 'string') return writeJson(res, 400, { ok: false, error: 'url required' })
+      let target
+      try { target = new URL(String(body.url)) } catch { return writeJson(res, 400, { ok: false, error: 'invalid url' }) }
+      const host = target.hostname.replace(/^\[|\]$/g, '')
+      const port = Number(target.port || (target.protocol === 'https:' ? 443 : 80))
+      const started = Date.now()
+      function tcp() {
+        return new Promise((resolve) => {
+          const socket = net.connect({ host, port, timeout: 2500 })
+          socket.once('connect', () => { socket.destroy(); resolve({ ok: true }) })
+          socket.once('timeout', () => { socket.destroy(); resolve({ ok: false, error: 'tcp timeout' }) })
+          socket.once('error', (error) => { socket.destroy(); resolve({ ok: false, error: String(error.message || error) }) })
+        })
+      }
+      const tcpResult = await tcp()
+      let tlsResult = null
+      if (tcpResult.ok && target.protocol === 'https:') {
+        tlsResult = await new Promise((resolve) => {
+          const socket = tls.connect({ host, port, rejectUnauthorized: false, servername: host, timeout: 2500 })
+          socket.once('secureConnect', () => { socket.destroy(); resolve({ ok: true, fingerprint: socket.getPeerCertificate()?.fingerprint256 || null }) })
+          socket.once('timeout', () => { socket.destroy(); resolve({ ok: false, error: 'tls timeout' }) })
+          socket.once('error', (error) => { socket.destroy(); resolve({ ok: false, error: String(error.message || error) }) })
+        })
+      }
+      writeJson(res, 200, { ok: tcpResult.ok, host, port, tcp: tcpResult.ok, tls: tlsResult, latencyMs: Date.now() - started })
+    }
+  }
 
   const lanPairRoute = {
     kind: 'exact',
@@ -263,7 +306,7 @@ export function apply(ctx) {
 
   ctx.effect(() => {
     const disposeRoute = ctx.webServer.register(route)
-    const disposeLanRoutes = [lanScanRoute, lanCodeRoute, lanPairRoute].map((item) => ctx.webServer.register(item))
+    const disposeLanRoutes = [lanScanRoute, lanCodeRoute, lanCheckRoute, lanPairRoute].map((item) => ctx.webServer.register(item))
     const disposeRoutes = delegateRoutes.map((item) => ctx.webServer.register(item))
     return () => {
       try {
