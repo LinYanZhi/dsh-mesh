@@ -1283,7 +1283,7 @@ function deviceLinkState(data, peer, lanMap) {
         node.up ? null : h('div', { className: 'dm-offline-row' }, '全部链路不可用' + (node.error ? ' · ' + node.error : '')),
         h('div', { className: 'dm-card-dsh' },
           (node.ports || []).map(function (item, pi) {
-            return h('span', { key: pi, className: 'dm-chip type' + (item.up ? ' run' : ' bad'), title: (item.up ? '在线' : '离线') + ' · DSH 端口 ' + item.port }, 'DSH:' + item.port)
+            return h('span', { key: pi, className: 'dm-chip type' + (item.up ? ' run' : ' bad'), title: (item.up ? '在线' : '离线') + ' · DSH 端口 ' + item.port }, String(item.port))
           })
         )
       )
