@@ -120,6 +120,8 @@ function nodeLabel(name) { return NODE_LABELS[String(name || '').toLowerCase()] 
     // [layout-helpers-end]
     // [relay-helpers-begin] 2026-11-09 架构层：识别公网中转站(frps)与通信方式（纯函数，可单测）
     // 2026-11-10 隐私：默认不展示公网 IP/域名；局域网/回环地址保留。
+    // 用户在页头打开「显示公网地址」后，maskHost/maskText 直接返回原值。
+    var showPublicAddresses = false
     function isPrivateNetworkHost(raw) {
       var h = String(raw || '').trim().toLowerCase().replace(/^\[|\]$/g, '')
       h = h.replace(/^https?:\/\//, '').split('/')[0].replace(/:\d+$/, '')
@@ -135,6 +137,7 @@ function nodeLabel(name) { return NODE_LABELS[String(name || '').toLowerCase()] 
     }
     function maskHost(raw) {
       var s = String(raw || '').trim()
+      if (showPublicAddresses) return s || '—'
       if (!s) return '—'
       var port = ''
       var m = /^(.*):(\d+)$/.exec(s)
@@ -142,6 +145,7 @@ function nodeLabel(name) { return NODE_LABELS[String(name || '').toLowerCase()] 
       return (isPrivateNetworkHost(s) ? s : '公网地址已隐藏') + port
     }
     function maskText(value) {
+      if (showPublicAddresses) return value
       if (typeof value !== 'string') return value
       return value
         .replace(/https?:\/\/[^\s"'<>]+/gi, function (u) {
@@ -1543,6 +1547,17 @@ function deviceLinkState(data, peer, lanMap) {
       var verdictState = useState(''); var verdictShown = verdictState[0]; var setVerdictShown = verdictState[1]
       var verdictRef = useRef({ raw: '', streak: 0 })
       var s5 = useState('local'); var selectedKey = s5[0]; var setSelectedKey = s5[1]
+      var sPublic = useState(function () {
+        try { return window.localStorage.getItem('dsh-mesh.show-public-addresses') === '1' } catch (error) { return false }
+      })
+      var showPublic = sPublic[0]; var setShowPublic = sPublic[1]
+      showPublicAddresses = showPublic
+      function toggleShowPublic(event) {
+        var next = Boolean(event && event.target && event.target.checked)
+        setShowPublic(next)
+        showPublicAddresses = next
+        try { window.localStorage.setItem('dsh-mesh.show-public-addresses', next ? '1' : '0') } catch (error) { /* ignore */ }
+      }
       // 双栏宽度：拖动分隔条调整并记忆，窄屏由 CSS 媒体查询自动堆叠。
       var dragState = useState(function () {
         try { var saved = Number(window.localStorage.getItem('dsh-mesh-split-w')); return Number.isFinite(saved) && saved > 0 ? saved : 0 } catch (error) { return 0 }
@@ -1684,6 +1699,10 @@ function deviceLinkState(data, peer, lanMap) {
           }, data.warming ? '预热中' : (verdictShown || data.verdict || '?')),
           h('span', { className: 'dm-sub' }, (data.meshVersion ? 'mesh ' + data.meshVersion + ' · ' : '') + (data.at ? ago(data.at) : '')),
           h('span', { style: { flex: 1 } }),
+          h('label', { className: 'dm-toggle', title: '默认隐藏公网 IP/域名；勾选后显示真实地址并记住选择' },
+            h('input', { type: 'checkbox', checked: Boolean(showPublic), onChange: toggleShowPublic }),
+            h('span', null, '显示公网地址')
+          ),
           h('a', { className: 'dm-btn', href: API, target: '_blank', rel: 'noreferrer', style: { textDecoration: 'none' } }, '原始 JSON'),
           h('button', { className: 'dm-btn', onClick: copyJson }, copied || '复制诊断'),
           h('button', { className: 'dm-btn primary', onClick: function () { load(true) }, title: '立即采集一次并等待新快照（8s 冷却）' }, loading ? '采集中…' : '刷新'),
@@ -2419,6 +2438,8 @@ body[data-ds-dark-theme] .dm-dg-fs-item.active { background:rgba(88,166,255,.28)
 .dm-lan-node { display:flex; gap:8px; align-items:center; border-top:1px solid rgba(128,128,128,.16); padding:7px 0; font-size:12px; }
 .dm-lan-node:first-child { border-top:none; }
 .dm-lan-code { font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:12px; padding:6px 8px; border-radius:8px; background:rgba(88,166,255,.1); border:1px solid rgba(88,166,255,.35); word-break:break-all; }
+.dm-toggle { display:inline-flex; align-items:center; gap:5px; font-size:11.5px; opacity:.8; cursor:pointer; user-select:none; white-space:nowrap; }
+.dm-toggle input { margin:0; }
 
 .dm-pane { min-width:0; display:flex; flex-direction:column; gap:12px; }
 .dm-divider { cursor:col-resize; align-self:stretch; min-height:120px; border-radius:4px; position:relative; }
