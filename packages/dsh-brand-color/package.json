@@ -1,0 +1,40 @@
+{
+  "name": "dsh-brand-color",
+  "version": "0.1.1",
+  "description": "DSH brand logo color picker: adds a Settings → brand color section with preset swatches and a custom color; recolors the sidebar/hero logo mark and favicon via a scoped CSS rule. Independent plugin, not part of dsh-mesh.",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json"
+  },
+  "engines": {
+    "node": "^22.19.0 || >=24.0.0",
+    "dsh": ">=0.2.0-rc.2 <0.3.0"
+  },
+  "dsh": {
+    "manifestVersion": 1,
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web"
+    }
+  },
+  "peerDependencies": {
+    "@deepseek-ai/dsh": ">=0.2.0-rc.2 <0.3.0"
+  },
+  "files": [
+    "lib/**/*.js",
+    "cordis.patch.yml",
+    "README.md",
+    "LICENSE"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/LinYanZhi/dsh-mesh.git"
+  },
+  "homepage": "https://github.com/LinYanZhi/dsh-mesh#readme"
+}

@@ -2249,6 +2249,16 @@ body[data-ds-dark-theme] .dm-dg-fs-item.active { background:rgba(88,166,255,.28)
       )
     }
 
+    // 2026-11-10：AI 网络现在是左侧栏主页面，不再受设置面板的窄容器约束。
+    // 主区域自身没有内边距，这里给页面统一留白并限制最大阅读宽度。
+    var PAGE_CSS = `
+.dm-page { box-sizing:border-box; width:100%; height:100%; overflow:auto; padding:clamp(16px, 2.2vw, 30px) clamp(18px, 2.6vw, 42px) 36px; }
+.dm-page > .dm-root { width:100%; max-width:1500px; margin:0 auto; }
+`
+    function MeshNetworkPage() {
+      return h('div', { className: 'dm-page' }, h('style', null, PAGE_CSS), h(MeshStatusSection))
+    }
+
     var SECTION = { name: 'settings.section', id: 'dsh-mesh', order: 90, label: 'AI 网络' }
     var inject = ['slots']
 
@@ -2320,7 +2330,7 @@ body[data-ds-dark-theme] .dm-dg-fs-item.active { background:rgba(88,166,255,.28)
           return ctx.slots.register({ name: 'sidebar.panellist', id: 'mesh-network', order: 54, label: function () { return 'AI 网络' } }, meshPanelIcon)
         }))
         disposers.push(ctx.slots.inject('main', function () {
-          return ctx.slots.register({ name: 'main', key: 'mesh-network', inject: function () { return {} } }, MeshStatusSection)
+          return ctx.slots.register({ name: 'main', key: 'mesh-network', inject: function () { return {} } }, MeshNetworkPage)
         }))
       } catch (error) {
         console.warn('[dsh-mesh-ui] sidebar network page registration failed:', error)

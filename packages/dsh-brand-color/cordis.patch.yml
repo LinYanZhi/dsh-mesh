@@ -1,0 +1,6 @@
+# dsh-brand-color bundle patch：插到 profile 的 patch 层
+# 服务端半：读写 $DSH_HOME/dsh-custom-brand.json 的 markColor（带备份）
+# 客户端半：设置窗口新增「品牌颜色」一节（预设色块 + 自定义颜色）
+- insert:
+    - id: dsh-brand-color
+      name: dsh-brand-color
