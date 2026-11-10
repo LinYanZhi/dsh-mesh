@@ -84,6 +84,19 @@ function taskStats(root) {
 export function buildCluster(ctx) {
   return [
     {
+      name: 'mesh_peers',
+      title: 'Lightweight configured peers',
+      description:
+        'Read-only, near-instant list of peer names configured in this node (peers.json). Does not probe peers, does not return tokens/URLs. Intended for topology federation; pair with the peer\'s own mesh_peers for one-hop visibility.',
+      inputSchema: z.object({}),
+      handler: async () => {
+        const peers = loadPeers(ctx.home).items || []
+        return ok({
+          peers: peers.map((peer) => ({ id: peer.id, name: peer.name }))
+        })
+      }
+    },
+    {
       name: 'cluster_status',
       title: 'Cluster health snapshot',
       description:

@@ -67,6 +67,7 @@ export const DEFAULT_ALLOW = [
   'tool_inventory',
   'file_write_chunk',
   'host_instances',
+  'mesh_peers',
   'mesh_overview',
   'host_self',
   'host_tools',
@@ -405,7 +406,7 @@ function migrateConfig(raw) {
   if (allowNow.includes('mesh_self') && allowNow.includes('fs_read')) {
     const next = new Set(allowNow)
     let added = 0
-    for (const name of FILE_TRANSFER_TOOLS) {
+    for (const name of [...FILE_TRANSFER_TOOLS, 'mesh_peers']) {
       if (!next.has(name)) {
         next.add(name)
         added += 1

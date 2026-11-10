@@ -294,6 +294,16 @@ export function apply(ctx) {
     const results = await Promise.all(direct.slice(0, 6).map(async (peer) => {
       const name = String(peer.name || '')
       if (!name) return null
+      // 快速路径：新节点暴露 mesh_peers（只读、不探测、毫秒级）。
+      const fast = await runCli(['peer', 'call', 'mesh_peers', '--to', name, '--timeout-ms', '4000'], 10_000)
+      if (!fast.error) {
+        try {
+          const fw = JSON.parse(fast.stdout)
+          const fi = JSON.parse(fw?.result?.content?.[0]?.text || '{}')
+          if (Array.isArray(fi.peers)) return { via: name, peers: fi.peers, instances: [] }
+        } catch { /* fall through */ }
+      }
+      // 兼容旧节点：回退到 cluster_status。
       const r = await runCli(['peer', 'call', 'cluster_status', '--to', name, '--args', JSON.stringify({ noPeers: true, probeSelf: false }), '--timeout-ms', '10000'], 16_000)
       if (r.error) { errors.push({ via: name, error: r.error }); return null }
       try {

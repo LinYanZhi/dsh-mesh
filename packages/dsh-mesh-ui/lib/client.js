@@ -1295,10 +1295,12 @@ function deviceLinkState(data, peer, lanMap) {
       var item = fed.item
       return h('div', { key: 'fed:' + item.via + ':' + item.name, className: 'dm-card-node indirect', style: { left: fed.x + 'px', top: fed.y + 'px', width: '172px', transform: 'translate(-50%,-50%)' }, title: '间接可达：经 ' + item.via },
         h('div', { className: 'dm-n-head' },
-          h('div', { className: 'dm-n-name' }, h('span', { className: 'dm-dot ' + (item.up ? 'ok' : 'bad') }), h('span', { className: 'dm-ell' }, item.name)),
+          h('div', { className: 'dm-n-name' }, h('span', { className: 'dm-dot ' + (item.up === true ? 'ok' : (item.up === false ? 'bad' : 'muted')), style: item.up == null ? { opacity: .45 } : undefined }), h('span', { className: 'dm-ell' }, item.name)),
           h('span', { className: 'dm-fed-badge' }, '经 ' + item.via)
         ),
-        h('div', { className: 'dm-card-dsh' }, h('span', { className: 'dm-chip' }, item.up ? (item.latencyMs != null ? item.latencyMs + 'ms' : '可达') : '不可达'))
+        h('div', { className: 'dm-card-dsh' },
+          h('span', { className: 'dm-chip' }, item.up === true ? (item.latencyMs != null ? item.latencyMs + 'ms' : '可达') : (item.up === false ? '不可达' : '间接 · 只读'))
+        )
       )
     }),
     (publicVisible ? h('div', {
