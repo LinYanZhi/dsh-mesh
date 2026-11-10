@@ -820,27 +820,30 @@ body.light .dm-edge-label { stroke: rgba(255,255,255,.92); }
       var topDeviceY = positions.length ? Math.min.apply(null, positions.map(function (p) { return p[1] })) : 0
       return { count: n, cardW: cardW, cardH: cardH, gap: GAP, W: W, H: H, positions: positions, edges: polygonEdges(n), topDeviceY: topDeviceY, mode: 'nodes-only', serverCenter: null }
     }
+    // 2026-11-10：一个服务器时用紧凑两排扇形，不再靠扩大半径防重叠
+    // 服务器在上方居中；设备分两排（上排少、下排多），列距/行距按卡片尺寸，整体宽度接近双服务器布局。
     function layoutServerCenter(count, cardW, cardH, GAP, PAD) {
       var n = Math.max(1, count)
-      var span = (2 * Math.PI) / 3
-      var step = n > 1 ? span / (n - 1) : 0
-      var radius = Math.max(cardH * 1.7, step > 0 ? (cardW + GAP) * 0.62 / (2 * Math.sin(step / 2)) : cardW * 0.9)
-      function fanPoints(r) {
-        var pts = []
-        for (var i = 0; i < n; i++) {
-          var a = Math.PI / 6 + i * step
-          pts.push([r * Math.cos(a), r * Math.sin(a)])
-        }
-        return pts
+      var topN = Math.floor(n / 2)
+      var botN = n - topN
+      var serverH = Math.max(cardH, 96)
+      var stepX = cardW + GAP
+      var upperY = serverH / 2 + GAP + cardH / 2
+      var lowerY = upperY + cardH + GAP
+      var raw = []
+      function rowXs(k) {
+        var xs = []
+        for (var i = 0; i < k; i++) xs.push((i - (k - 1) / 2) * stepX)
+        return xs
       }
-      var raw = fanPoints(radius)
-      for (var tries = 0; tries < 240 && fanHasOverlap(raw, cardW, cardH, GAP, true); tries++) {
-        radius += 8
-        raw = fanPoints(radius)
-      }
+      var ux = rowXs(topN)
+      for (var i = 0; i < topN; i++) raw.push([ux[i], upperY])
+      var bx = rowXs(botN)
+      var by = topN > 0 ? lowerY : upperY
+      for (var j = 0; j < botN; j++) raw.push([bx[j], by])
       var minX = Math.min(-cardW / 2, ...raw.map(function (p) { return p[0] - cardW / 2 }))
       var maxX = Math.max(cardW / 2, ...raw.map(function (p) { return p[0] + cardW / 2 }))
-      var minY = Math.min(-cardH / 2, ...raw.map(function (p) { return p[1] - cardH / 2 }))
+      var minY = -serverH / 2
       var maxY = Math.max(cardH / 2, ...raw.map(function (p) { return p[1] + cardH / 2 }))
       var ox = -minX + PAD
       var oy = -minY + PAD
