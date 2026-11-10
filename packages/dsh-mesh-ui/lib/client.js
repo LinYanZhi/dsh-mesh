@@ -678,7 +678,7 @@ body.light .dm-edge-label { stroke: rgba(255,255,255,.92); }
             h('span', null, '⋯')
           )
         ),
-        h('div', { className: 'dm-hint' }, '拓扑 v21 · 内容 ' + Math.round(layout.W) + '×' + Math.round(layout.H) + 'px · 卡 ' + Math.round(layout.cardW) + '×' + Math.round(layout.cardH) + ' · 缩放 ' + Math.round(view.scale * 100) + '% · 滚轮缩放 / 拖拽平移')
+        h('div', { className: 'dm-hint' }, '拓扑 v23 · 内容 ' + Math.round(layout.W) + '×' + Math.round(layout.H) + 'px · 卡 ' + Math.round(layout.cardW) + '×' + Math.round(layout.cardH) + ' · 缩放 ' + Math.round(view.scale * 100) + '% · 滚轮缩放 / 拖拽平移')
       )
     }
 
@@ -1453,6 +1453,9 @@ function deviceLinkState(data, peer, lanMap) {
       // 2026-11-10：真刷新 —— 点击后等待后台采集完成再渲染；本地冷却 + 忙锁防止连点刷爆请求
       var s6 = useState(""); var refreshHint = s6[0]; var setRefreshHint = s6[1]
       var forceRef = useRef({ at: 0, busy: false })
+      // 2026-11-10：verdict 防抖 —— 单次探测失败（远端忙/超时）只显示 degraded，连续 2 次才显示 down
+      var verdictState = useState(''); var verdictShown = verdictState[0]; var setVerdictShown = verdictState[1]
+      var verdictRef = useRef({ raw: '', streak: 0 })
       var s5 = useState('local'); var selectedKey = s5[0]; var setSelectedKey = s5[1]
 
       function load(force) {
@@ -1515,6 +1518,24 @@ function deviceLinkState(data, peer, lanMap) {
       }, [])
 
       useEffect(function () { if (tick > 0 && !forceRef.current.busy) load(false) }, [tick])
+      useEffect(function () {
+        var raw = String((data && data.verdict) || '')
+        if (!raw) return
+        var st = verdictRef.current
+        var at = String((data && data.at) || '')
+        var fresh = Boolean(at) && at !== st.lastAt
+        if (raw === 'down') {
+          if (fresh && !st.downAt) st.downAt = Date.now()
+          st.lastAt = at
+          var persisted = Boolean(st.downAt) && Date.now() - st.downAt >= 15000
+          setVerdictShown(persisted ? 'down' : 'degraded')
+        } else {
+          st.downAt = 0
+          st.lastAt = at
+          setVerdictShown(raw)
+        }
+        st.raw = raw
+      }, [data])
 
       function copyJson() {
         var text = JSON.stringify(data || {}, null, 2)
@@ -1540,7 +1561,11 @@ function deviceLinkState(data, peer, lanMap) {
         h('style', null, CSS),
         h('div', { className: 'dm-head' },
           h('span', { className: 'dm-title' }, 'AI 网络 · dsh-mesh'),
-          h('span', { className: 'dm-pill ' + (data.warming ? 'muted' : tone(data.verdict)) }, data.warming ? '预热中' : (data.verdict || '?')),
+          h('span', {
+            className: 'dm-pill ' + (data.warming ? 'muted' : tone(verdictShown || data.verdict)),
+            title: data.warming ? '' : (verdictShown === 'degraded' ? '探测波动：需持续 ≥15s 且新快照仍 down 才显示 down' : ''),
+            style: verdictShown === 'degraded' ? { opacity: 0.75 } : undefined
+          }, data.warming ? '预热中' : (verdictShown || data.verdict || '?')),
           h('span', { className: 'dm-sub' }, (data.meshVersion ? 'mesh ' + data.meshVersion + ' · ' : '') + (data.at ? ago(data.at) : '')),
           h('span', { style: { flex: 1 } }),
           h('a', { className: 'dm-btn', href: API, target: '_blank', rel: 'noreferrer', style: { textDecoration: 'none' } }, '原始 JSON'),
@@ -2265,12 +2290,22 @@ body[data-ds-dark-theme] .dm-dg-fs-item.active { background:rgba(88,166,255,.28)
           var button = buttons[i]
           var text = (button.textContent || '').trim()
           if (text !== 'AI 网络' && text !== 'AI 网络（dsh-mesh）') continue
-          if (button.querySelector('svg[data-dsh-mesh-nav-icon]')) continue
-          var gear = button.querySelector('svg')
-          var className = gear ? gear.getAttribute('class') || '' : ''
-          var icon = navMeshIconDom(className)
-          if (gear && gear.parentNode === button) button.replaceChild(icon, gear)
-          else button.insertBefore(icon, button.firstChild)
+          // 0.2.2 的默认图标可能包在 span 里；在默认图标的父容器里原地替换，
+          // 保留间距/对齐，并清掉所有旧 SVG，避免齿轮 + 自绘图标双图标。
+          var existingIcon = button.querySelector('svg[data-dsh-mesh-nav-icon]')
+          var old = []
+          var all = button.querySelectorAll('svg')
+          for (var j = 0; j < all.length; j++) if (all[j] !== existingIcon) old.push(all[j])
+          var reference = old[0] || null
+          var parent = reference ? reference.parentNode : button
+          var className = reference ? reference.getAttribute('class') || '' : ''
+          if (!existingIcon) {
+            var icon = navMeshIconDom(className)
+            if (reference) parent.insertBefore(icon, reference)
+            else if (button.firstChild) button.insertBefore(icon, button.firstChild)
+            else button.appendChild(icon)
+          }
+          for (var k = 0; k < old.length; k++) if (old[k].parentNode) old[k].parentNode.removeChild(old[k])
         }
       } catch (error) {
         /* ignore */
@@ -2279,10 +2314,16 @@ body[data-ds-dark-theme] .dm-dg-fs-item.active { background:rgba(88,166,255,.28)
 
     function apply(ctx) {
       var disposers = []
+      // 2026-11-10：AI 网络从「设置」迁到左侧栏独立页面，使用更大的主区域。
       try {
-        disposers.push(ctx.slots.inject('settings.section', function () { return ctx.slots.register(SECTION, MeshStatusSection) }))
+        disposers.push(ctx.slots.inject('sidebar.panellist', function () {
+          return ctx.slots.register({ name: 'sidebar.panellist', id: 'mesh-network', order: 54, label: function () { return 'AI 网络' } }, meshPanelIcon)
+        }))
+        disposers.push(ctx.slots.inject('main', function () {
+          return ctx.slots.register({ name: 'main', key: 'mesh-network', inject: function () { return {} } }, MeshStatusSection)
+        }))
       } catch (error) {
-        console.warn('[dsh-mesh-ui] settings section registration failed:', error)
+        console.warn('[dsh-mesh-ui] sidebar network page registration failed:', error)
       }
       // 2026-11-07 方案 A：左侧栏「委托」面板（sidebar.panellist + main）
       try {

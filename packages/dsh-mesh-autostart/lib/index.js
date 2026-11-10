@@ -15,17 +15,43 @@
  * 约束：纯 ESM、不 import @deepseek-ai/*，可直接放进任意 DSH profile 的 node_modules。
  */
 import { spawn, execFileSync } from 'node:child_process'
-import { appendFileSync, existsSync, mkdirSync, openSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { existsSync, appendFileSync, mkdirSync, openSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs'
+import { createRequire } from 'node:module'
+import { dirname, join } from 'node:path'
 import { homedir } from 'node:os'
 import net from 'node:net'
 
 export const name = 'dsh-mesh-autostart'
 export const inject = []
 
+/**
+ * Locate the dsh-mesh-node installation that owns the mesh server.
+ * Order: DSH_MESH_REPO -> installed dsh-mesh-node dependency -> legacy phone path.
+ * Missing installation fails loud: silently doing nothing was the original bug.
+ */
+function resolveMeshRoot() {
+  const candidates = []
+  if (process.env.DSH_MESH_REPO) candidates.push(process.env.DSH_MESH_REPO)
+  try {
+    const requireFromPlugin = createRequire(import.meta.url)
+    candidates.push(dirname(requireFromPlugin.resolve('dsh-mesh-node/package.json')))
+  } catch {
+    /* dependency not installed */
+  }
+  // Legacy phone-kit layout: keep working when the file really exists.
+  candidates.push('/root/dsh-mesh-kit/mesh')
+  for (const candidate of candidates) {
+    if (candidate && existsSync(join(candidate, 'src', 'cli.js'))) return candidate
+  }
+  throw new Error(
+    'dsh-mesh-autostart: dsh-mesh-node is not installed (no dsh-mesh-node dependency and no DSH_MESH_REPO). ' +
+      'Install it with `npm i -g dsh-mesh-node`, or set DSH_MESH_REPO to a dsh-mesh checkout.'
+  )
+}
+
 export function apply(ctx) {
   const meshHome = process.env.DSH_MESH_HOME || join(homedir(), '.dsh-mesh')
-  const repo = process.env.DSH_MESH_REPO || '/root/dsh-mesh-kit/mesh'
+  const repo = resolveMeshRoot()
   const cli = join(repo, 'src', 'cli.js')
   const frpcBin = process.env.DSH_FRPC_BIN || '/root/dsh-mesh-kit/frp/frpc'
   const frpcConf = process.env.DSH_FRPC_CONF || '/root/dsh-mesh-kit/frp/frpc.toml'

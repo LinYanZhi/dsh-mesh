@@ -1,7 +1,7 @@
 {
   "name": "dsh-mesh-autostart",
-  "version": "0.0.5",
-  "description": "DSH host plugin: supervise a dsh-mesh server (and optional frpc) inside the DSH engine process so it survives engine restarts. Designed for phone/desktop DSH apps.",
+  "version": "0.0.6",
+  "description": "DSH host plugin: supervise a dsh-mesh server (and optional frpc) inside the DSH engine process so it survives engine restarts. Resolves the installed dsh-mesh-node package and fails loud when it is missing.",
   "type": "module",
   "main": "lib/index.js",
   "exports": {
@@ -17,6 +17,9 @@
     "bundle": {
       "patch": "./cordis.patch.yml"
     }
+  },
+  "dependencies": {
+    "dsh-mesh-node": "0.0.12"
   },
   "peerDependencies": {
     "@deepseek-ai/dsh": ">=0.2.0-rc.2 <0.3.0"

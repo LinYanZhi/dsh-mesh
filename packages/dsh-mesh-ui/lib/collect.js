@@ -15,10 +15,11 @@
 
 import { execFile } from 'node:child_process'
 import { existsSync, readdirSync, readFileSync, statfsSync, writeFileSync } from 'node:fs'
+import { createRequire } from 'node:module'
 import { lookup as dnsLookup } from 'node:dns/promises'
 import { connect as netConnect } from 'node:net'
 import { arch as osArch, cpus as osCpus, freemem as osFreemem, homedir, platform as osPlatform, release as osRelease, totalmem as osTotalmem } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 
 const CLI_TIMEOUT_MS = 25_000
 const ALERT_HISTORY_MAX = 12
@@ -29,9 +30,19 @@ export function meshHome() {
 }
 
 export function resolveRepo() {
+  // 1) 显式 DSH_MESH_REPO / 常见开发目录（源码/本地仓库）
   const candidates = [process.env.DSH_MESH_REPO, join(homedir(), 'Code', 'dsh-mesh'), join(homedir(), 'Desktop', 'dsh-mesh')].filter(Boolean)
   for (const candidate of candidates) {
-    if (existsSync(join(candidate, 'scripts', 'mesh-health.mjs'))) return candidate
+    if (existsSync(join(candidate, 'scripts', 'mesh-health.mjs')) && existsSync(join(candidate, 'src', 'cli.js'))) return candidate
+  }
+  // 2) 用户正常安装路径：dsh-mesh-ui 声明了 dsh-mesh-node 依赖，
+  //    直接解析已安装的 npm 包（随包带 scripts/mesh-health.mjs）。
+  try {
+    const requireFromPlugin = createRequire(import.meta.url)
+    const nodeRoot = dirname(requireFromPlugin.resolve('dsh-mesh-node/package.json'))
+    if (existsSync(join(nodeRoot, 'scripts', 'mesh-health.mjs')) && existsSync(join(nodeRoot, 'src', 'cli.js'))) return nodeRoot
+  } catch {
+    /* package not installed next to this plugin */
   }
   return null
 }
@@ -391,7 +402,7 @@ async function overviewData(repo, force = false) {
  */
 export async function collect(repo) {
   const generatedAt = new Date().toISOString()
-  if (!repo) return { ok: false, error: 'dsh-mesh repo not found (set DSH_MESH_REPO)', generatedAt }
+  if (!repo) return { ok: false, error: 'dsh-mesh-node is not installed for dsh-mesh-ui (install it with `npm i -g dsh-mesh-node`, or set DSH_MESH_REPO to a dsh-mesh checkout)', generatedAt }
 
   const meshPromise = meshHealthJson(repo)
   const overviewPromise = overviewData(repo)

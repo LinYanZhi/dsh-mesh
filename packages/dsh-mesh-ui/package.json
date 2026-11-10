@@ -1,7 +1,7 @@
 {
   "name": "dsh-mesh-ui",
-  "version": "0.0.11",
-  "description": "DSH settings-page panel for dsh-mesh: AI network topology, peer health, and delegation panel. Read-only; data is collected from the local mesh CLI.",
+  "version": "0.0.12",
+  "description": "DSH sidebar page for dsh-mesh: AI network topology, peer health, and delegation panel. Read-only; data is collected from the installed dsh-mesh-node package.",
   "icon": "icon.svg",
   "type": "module",
   "engines": {
@@ -26,6 +26,9 @@
       ],
       "platform": "web"
     }
+  },
+  "dependencies": {
+    "dsh-mesh-node": "0.0.12"
   },
   "peerDependencies": {
     "@deepseek-ai/dsh": ">=0.2.0-rc.2 <0.3.0",

@@ -142,14 +142,14 @@ function walkMatch(root, match, limit) {
   return out
 }
 
-function findFiles(ctx, { query, root, limit = 100, exts = null, minSizeBytes = null, modifiedAfter = null }) {
+async function findFiles(ctx, { query, root, limit = 100, exts = null, minSizeBytes = null, modifiedAfter = null }) {
   const cfg = ctx.getConfig()
   const guarded = resolveGuarded(root || (cfg.acl?.fsRoots?.[0]?.path ?? cfg.acl?.fsRoots?.[0] ?? homedir()), cfg)
   if (guarded.error) return guarded.error
   const absRoot = guarded.abs
   if (!existsSync(absRoot)) return notFound(`root not found: ${absRoot}`)
   const es = toolInfo('es')
-  if (es.path) {
+  if (es.path && process.env.DSH_MESH_FORCE_HTTP !== '1') {
     // 2026-11-10：两个实测坑 —— ① ES 输出是系统 ANSI(GBK)，按 UTF-8 解会中文乱码 → buffer + UTF-8 严格→GBK 回退；
     // ② 多词合成单个 argv 会被 ES 当「字面短语」→ 0 结果，必须拆成多个 argv（ext 过滤也单独一个 argv）
     const args = ['-n', String(Math.min(limit, 500)), '-path', absRoot]
@@ -172,6 +172,60 @@ function findFiles(ctx, { query, root, limit = 100, exts = null, minSizeBytes = 
       return ok({ tool: 'everything', count: entries.length, entries })
     }
   }
+
+  // 2026-11-10：Everything HTTP 回退（方案 A）。DSH/mesh 跑在 session 0 的非交互 window station 时，
+  // es.exe 的 IPC 找不到 Everything 窗口（Error 8）；但 Everything 的 HTTP 服务（用户会话 GUI 里开启）
+  // 监听 127.0.0.1，跨会话 TCP 可达。端口：env EVERYTHING_HTTP_PORT > config.tools.everythingHttpPort > 12812。
+  const httpPort = Number(process.env.EVERYTHING_HTTP_PORT || (cfg.tools && cfg.tools.everythingHttpPort) || 0) || 12812
+  if (process.env.DSH_MESH_NO_HTTP !== '1') {
+    try {
+      const tokens = String(query || '').split(/\s+/).map((s) => s.trim()).filter(Boolean)
+      if (exts && exts.length) tokens.push('ext:' + exts.map((e) => String(e).replace(/^\./, '')).join(';'))
+      // Everything HTTP：path:<root> 限定目录，其余 token 按文件名匹配
+      const params = new URLSearchParams({
+        search: 'path:' + absRoot + ' ' + tokens.join(' '),
+        json: '1',
+        count: String(Math.min(limit, 500)),
+        path: '1',
+        path_column: '1',
+        size_column: '1',
+        date_modified_column: '1'
+      })
+      const res = await fetch('http://127.0.0.1:' + httpPort + '/?' + params.toString(), {
+        signal: AbortSignal.timeout(4000)
+      })
+      if (res.ok) {
+        const payload = await res.json()
+        const rows = Array.isArray(payload && payload.results) ? payload.results : []
+        const rootLower = absRoot.toLowerCase().replace(/\//g, '\\')
+        const entries = []
+        for (const row of rows) {
+          // HTTP JSON 的 path 是「父目录」，name 才是文件名/文件夹名 → 拼成完整路径
+          const rowPath = String(row.path || '')
+          const rowName = String(row.name || '')
+          const p = rowPath && rowName ? rowPath.replace(/[\\/]+$/, '') + '\\' + rowName : (rowPath || rowName)
+          if (!p) continue
+          const pLower = p.toLowerCase().replace(/\//g, '\\')
+          if (pLower !== rootLower && !pLower.startsWith(rootLower + '\\')) continue
+          const isDir = String(row.type || '').toLowerCase() === 'folder'
+          const sizeRaw = String(row.size == null ? '' : row.size).replace(/[^\d]/g, '')
+          const ticks = Number(row.date_modified)
+          entries.push({
+            path: p,
+            name: String(row.name || basename(p)),
+            type: isDir ? 'dir' : 'file',
+            sizeBytes: !isDir && sizeRaw ? Number(sizeRaw) : null,
+            mtimeMs: Number.isFinite(ticks) && ticks > 0 ? Math.round(ticks / 10000 - 11644473600000) : null
+          })
+          if (entries.length >= Math.min(limit, 500)) break
+        }
+        if (entries.length || rows.length) return ok({ tool: 'everything-http', count: entries.length, entries })
+      }
+    } catch {
+      /* HTTP 不可用（未启用/端口不对）则继续 fd/walk 回退 */
+    }
+  }
+
   const fd = toolInfo('fd')
   if (fd.path) {
     const args = ['--hidden', '--max-results', String(Math.min(limit, 500)), '--absolute-path']
