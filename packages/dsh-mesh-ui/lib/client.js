@@ -313,12 +313,22 @@ body.light .dm-edge-label { stroke: rgba(255,255,255,.92); }
 .dm-details > summary::-webkit-details-marker { display:none; }
 .dm-details > summary::before { content:'▸'; font-size:10px; opacity:.5; transition:transform .12s; }
 .dm-details[open] > summary::before { transform:rotate(90deg); }
-.dm-details > .dm-body { padding:0 12px 11px; }
+.dm-details > .dm-details-body { padding:0 12px 11px; }
 .dm-table { width:100%; border-collapse:collapse; }
 .dm-table th { text-align:left; font-weight:600; font-size:11px; opacity:.5; padding:2px 8px 5px 0; border-bottom:1px solid rgba(128,128,128,.2); white-space:nowrap; }
 .dm-table td { padding:5px 8px 5px 0; border-bottom:1px solid rgba(128,128,128,.1); font-size:12px; }
 .dm-table tr:last-child td { border-bottom:none; }
-.dm-trunc { max-width:190px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; display:inline-block; vertical-align:bottom; }
+/* 2026-11-10：委托台账表改为固定列宽 + 单行省略；非固定布局下 5 列会把「节点/任务」压到
+   每行一个字，就是用户看到的竖排。完整内容看 title 悬浮提示。 */
+.dm-details .dm-table { table-layout:fixed; min-width:420px; }
+.dm-table-wrap { overflow-x:auto; }
+.dm-details .dm-table th, .dm-details .dm-table td { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.dm-details .dm-table th:nth-child(1), .dm-details .dm-table td:nth-child(1) { width:16%; }
+.dm-details .dm-table th:nth-child(2), .dm-details .dm-table td:nth-child(2) { width:18%; }
+.dm-details .dm-table th:nth-child(3), .dm-details .dm-table td:nth-child(3) { width:22%; }
+.dm-details .dm-table th:nth-child(4), .dm-details .dm-table td:nth-child(4) { width:10%; }
+/* 目标列不写死百分比：让它吃掉剩余空间（单元格右内边距不参与百分比，写死 34% 会溢出 1 条横向滚动条） */
+.dm-trunc { max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; display:inline-block; vertical-align:bottom; }
 .dm-instrow { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:6px 0; border-bottom:1px solid rgba(128,128,128,.1); }
 .dm-instrow:last-child { border-bottom:none; }
 .dm-alertrow { display:flex; gap:8px; align-items:baseline; padding:5px 0; border-bottom:1px dashed rgba(128,128,128,.16); font-size:12px; }
@@ -1441,7 +1451,9 @@ function deviceLinkState(data, peer, lanMap) {
       }
       return h('details', { className: 'dm-details', open: open, onToggle: onToggle },
         h('summary', null, props.title, props.badge != null ? h('span', { className: 'dm-pill muted' }, String(props.badge)) : null),
-        h('div', { className: 'dm-body' }, props.children)
+        // 2026-11-10：折叠面板正文用独立容器整栏铺满；原先借用 .dm-body（62% 双栏 grid）
+        // 会把「委托台账」这类单列表格压到 300px，中文被逐字折成竖排。
+        h('div', { className: 'dm-details-body' }, props.children)
       )
     }
 
@@ -1472,17 +1484,20 @@ function deviceLinkState(data, peer, lanMap) {
       if (!list.length) return h('div', { className: 'dm-empty' }, '暂无委托记录')
       return h('div', null,
         h('div', { className: 'dm-sub', style: { marginBottom: 5 } }, '共 ' + (d.total || 0) + ' 条 · ' + Object.keys(stats).map(function (k) { return k + ' ' + stats[k] }).join(' · ')),
-        h('table', { className: 'dm-table' },
-          h('thead', null, h('tr', null, h('th', null, '状态'), h('th', null, '节点'), h('th', null, '任务'), h('th', null, '耗时'), h('th', null, '目标'))),
-          h('tbody', null, list.map(function (task) {
-            return h('tr', { key: task.taskId },
-              h('td', null, stateChip(task.state)),
-              h('td', null, nodeLabel(task.node)),
-              h('td', { className: 'dm-mono', style: { fontSize: 11 } }, String(task.taskId || '').replace(/^T-\d{8}-/, 'T-…')),
-              h('td', { className: 'dm-mono' }, dur(task.durationSec)),
-              h('td', null, h('span', { className: 'dm-trunc', title: task.goal }, task.goal || ''))
-            )
-          }))
+        // 2026-11-10：外层给横向滚动兜底——栏窄到连固定列宽都放不下时滚动，而不是压缩成竖排。
+        h('div', { className: 'dm-table-wrap' },
+          h('table', { className: 'dm-table' },
+            h('thead', null, h('tr', null, h('th', null, '状态'), h('th', null, '节点'), h('th', null, '任务'), h('th', null, '耗时'), h('th', null, '目标'))),
+            h('tbody', null, list.map(function (task) {
+              return h('tr', { key: task.taskId },
+                h('td', null, stateChip(task.state)),
+                h('td', { title: nodeLabel(task.node) }, nodeLabel(task.node)),
+                h('td', { className: 'dm-mono', style: { fontSize: 11 }, title: String(task.taskId || '') }, String(task.taskId || '').replace(/^T-\d{8}-/, 'T-…')),
+                h('td', { className: 'dm-mono' }, dur(task.durationSec)),
+                h('td', null, h('span', { className: 'dm-trunc', title: task.goal }, task.goal || ''))
+              )
+            }))
+          )
         )
       )
     }
@@ -2441,17 +2456,26 @@ body[data-ds-dark-theme] .dm-dg-fs-item.active { background:rgba(88,166,255,.28)
     }
 
     // 2026-11-10：AI 网络现在是左侧栏主页面，不再受设置面板的窄容器约束。
-    // 主区域自身没有内边距，这里给页面统一留白并限制最大阅读宽度。
+    // 2026-11-10（二次）：内边距从 .dm-page 挪到滚动容器上——滚动条属于滚动容器，只有在滚动容器
+    // 铺满整页时才会像 DSH 对话区那样贴到最右边；内容留白靠滚动容器自己的 padding 提供。
     var PAGE_CSS = `
-.dm-page { box-sizing:border-box; width:100%; height:100%; overflow:hidden; padding:clamp(16px, 2.2vw, 30px) clamp(18px, 2.6vw, 42px) 0; }
+.dm-page { box-sizing:border-box; width:100%; height:100%; overflow:hidden; padding:0; --dm-pad-x:clamp(18px, 2.6vw, 42px); --dm-pad-y:clamp(16px, 2.2vw, 30px); --dm-scroll-inset:2px; }
 .dm-content-shell { width:100%; height:100%; position:relative; --dm-content-w:920px; }
-.dm-content-scroll { height:100%; overflow:auto; padding-bottom:36px; scrollbar-gutter:stable; }
+/* 纵向滚动条：对齐 DSH 对话区 wSkVaW_scrollBody 的观感——滚动容器 margin-right:2px
+   （滚动条离面板边 2px，不贴死），滑块 track 留 2px（滑块上下不顶到边）。
+   滚动条只占右侧会把内容挤得偏左，所以左侧补等宽内边距（--dm-sb-pad）。 */
+/* border-box 必须加：height:100% + 上下 padding 否则把滚动容器撑出面板高度，
+   底部 padding 和页脚会被 .dm-page 的 overflow:hidden 裁掉（2026-11-10 实测 1051 > 985）。 */
+.dm-content-scroll { box-sizing:border-box; height:100%; overflow:auto; scrollbar-gutter:stable; margin-right:var(--dm-scroll-inset); padding:var(--dm-pad-y) var(--dm-pad-x) 36px; padding-left:calc(var(--dm-pad-x) + var(--dm-sb-pad, 0px) + var(--dm-scroll-inset)); }
+.dm-content-scroll::-webkit-scrollbar-track { margin:2px; }
 .dm-content { width:min(100%, var(--dm-content-w)); max-width:100%; margin:0 auto; box-sizing:border-box; container-type:inline-size; container-name:dm-content; }
 .dm-content > .dm-root { width:100%; max-width:100%; margin:0 auto; }
-/* 与 DSH 对话区一致的宽度手柄：位于内容两侧外 24px，平时隐藏，hover/拖拽显示 2px 渐变线 */
-.dm-width-handle { z-index:0; position:absolute; top:0; bottom:0; cursor:col-resize; width:clamp(0px, calc((100% - var(--dm-content-w)) / 2 - 48px), 10px); }
-.dm-width-handle[data-side="left"] { right:calc(50% + var(--dm-content-w) / 2 + 24px); }
-.dm-width-handle[data-side="right"] { left:calc(50% + var(--dm-content-w) / 2 + 24px); }
+/* 宽度手柄：位置由 JS 实测的「内容边距 + 页面留白」算出高亮线中心点，写进 --dm-bar-l / --dm-bar-r。
+   高亮线在 10px 手柄内偏内侧 5px（::after 4px + 2px 线宽的一半），所以手柄 = 中心点 ∓ 5px。
+   这样留白窄时（拖到最大）高亮线自动居中在「内容边 ↔ 页面边」中间，留白宽时保持 24px 间隙。 */
+.dm-width-handle { z-index:1; position:absolute; top:0; bottom:0; cursor:col-resize; width:10px; }
+.dm-width-handle[data-side="left"] { left:calc(var(--dm-bar-l, -100px) - 5px); }
+.dm-width-handle[data-side="right"] { right:calc(var(--dm-bar-r, -100px) - 5px); }
 .dm-width-handle::after { content:''; pointer-events:none; opacity:0; position:absolute; top:0; bottom:0; width:2px; border-radius:2px; background:linear-gradient(to bottom, transparent calc(var(--dm-width-handle-pointer-y, 50%) - 36px), var(--dsw-alias-scrollbar-bg-l1, rgba(128,128,128,.55)) calc(var(--dm-width-handle-pointer-y, 50%) - 8px), var(--dsw-alias-scrollbar-bg-l1, rgba(128,128,128,.55)) calc(var(--dm-width-handle-pointer-y, 50%) + 8px), transparent calc(var(--dm-width-handle-pointer-y, 50%) + 36px)); }
 .dm-width-handle[data-side="left"]::after { right:4px; }
 .dm-width-handle[data-side="right"]::after { left:4px; }
@@ -2481,12 +2505,29 @@ body[data-ds-dark-theme] .dm-dg-fs-item.active { background:rgba(88,166,255,.28)
       })
       var pref = prefState[0]; var setPref = prefState[1]
       var shellState = useState(0); var containerW = shellState[0]; var setContainerW = shellState[1]
+      // 滚动条实际占位宽度（px）：左侧补等宽内边距，让内容在 shell 上真正居中。
+      var sbState = useState(0); var sbPad = sbState[0]; var setSbPad = sbState[1]
+      // 手柄几何：内容元素到 shell 左右边的实测 px（null = 还没量到）。
+      var geoState = useState(null); var geo = geoState[0]; var setGeo = geoState[1]
       var shellRef = useRef(null)
 
+      // 2026-11-10：宽度基准 =「内容可用宽度」= 滚动容器内容盒宽（clientWidth - 左右 padding）；
+      // 滚动条贴页面右边，其占位由 CSS 在左侧补等宽 padding 抵消（--dm-sb-pad）。
       useEffect(function () {
         var el = shellRef.current
         if (!el) return
-        function measure() { setContainerW(el.clientWidth || 0) }
+        function measure() {
+          var scroller = el.querySelector('.dm-content-scroll')
+          if (!scroller) { setContainerW(el.clientWidth || 0); return }
+          var sb = Math.max(0, (scroller.offsetWidth || 0) - (scroller.clientWidth || 0))
+          var scs = getComputedStyle(scroller)
+          var padL = parseFloat(scs.paddingLeft) || 0
+          var padR = parseFloat(scs.paddingRight) || 0
+          // 内容盒宽 = clientWidth - 实际左右 padding（左侧含滚动条补偿与 2px 滚动条外留白）
+          var avail = Math.max(0, (scroller.clientWidth || 0) - padL - padR)
+          setContainerW(avail)
+          setSbPad(function (prev) { return Math.abs(prev - sb) >= 0.5 ? sb : prev })
+        }
         measure()
         if (typeof ResizeObserver !== 'undefined') {
           var observer = new ResizeObserver(measure)
@@ -2495,19 +2536,67 @@ body[data-ds-dark-theme] .dm-dg-fs-item.active { background:rgba(88,166,255,.28)
         }
         window.addEventListener('resize', measure)
         return function () { window.removeEventListener('resize', measure) }
-      }, [])
+      }, [sbPad])
 
-      // DSH 对话区公式：默认 clamp(680, 64% 容器, 920)；用户值 [640, 容器-176]。
+      // 手柄定位：高亮线在「内容边 ↔ 页面边」的留白里自动居中（留白宽时退回 24px 间隙）。
+      // 滚动容器已铺满整页，所以内容到 shell 左右边的距离就是完整留白（右侧含滚动条）。 */
+      useEffect(function () {
+        var el = shellRef.current
+        if (!el) return
+        var raf = 0
+        function sync() {
+          var content = el.querySelector('.dm-content')
+          if (!content) return
+          var sr = el.getBoundingClientRect()
+          var cr = content.getBoundingClientRect()
+          // 留白量到 shell（页面）边：滚动条外那 2px 也算留白，高亮线才居中在视觉留白里
+          var offL = cr.left - sr.left
+          var offR = sr.right - cr.right
+          // 高亮线中心到内容边的距离：留白的一半，但夹在 [12, 29]（29 = 24px 间隙 + 5px 线中心偏移）
+          var gapL = Math.max(12, Math.min(29, offL / 2))
+          var gapR = Math.max(12, Math.min(29, offR / 2))
+          var bl = Math.round((offL - gapL) * 10) / 10
+          var br = Math.round((offR - gapR) * 10) / 10
+          setGeo(function (prev) {
+            if (prev && Math.abs(prev.l - bl) < 0.5 && Math.abs(prev.r - br) < 0.5) return prev
+            return { l: bl, r: br }
+          })
+        }
+        sync()
+        raf = window.requestAnimationFrame(sync)
+        if (typeof ResizeObserver !== 'undefined') {
+          var observer = new ResizeObserver(sync)
+          var content = el.querySelector('.dm-content')
+          if (content) observer.observe(content)
+          observer.observe(el)
+          return function () { window.cancelAnimationFrame(raf); observer.disconnect() }
+        }
+        return function () { window.cancelAnimationFrame(raf) }
+      }, [contentW, sbPad])
+
+      // 默认宽度 = 内容可用宽度 x DEFAULT_W_RATIO；拖拽限制在 [640, 可用宽度]，
+      // 双击手柄清掉偏好后回到默认。想留一点内边距就把 DEFAULT_W_RATIO 调到 0.98/0.96。
+      var DEFAULT_W_RATIO = 1
       var widthNow = containerW || 920
-      var maxW = Math.max(640, widthNow - 176)
-      var contentW = pref > 0 ? Math.min(Math.max(pref, 640), maxW) : Math.max(680, Math.min(widthNow * 0.64, 920))
+      var maxW = Math.max(640, widthNow)
+      var contentW = pref > 0 ? Math.min(Math.max(pref, 640), maxW) : Math.round(widthNow * DEFAULT_W_RATIO)
 
       function beginWidthDrag(side, event) {
         event.preventDefault()
         var handle = event.currentTarget
         var shell = handle.closest ? handle.closest('.dm-content-shell') : (handle.parentElement && handle.parentElement.parentElement)
         if (!shell) return
-        var max = Math.max(640, (shell.clientWidth || 920) - 176)
+        var scroller = shell.querySelector('.dm-content-scroll')
+        var max = 920
+        if (scroller) {
+          var scs2 = getComputedStyle(scroller)
+          var padL2 = parseFloat(scs2.paddingLeft) || 0
+          var padR2 = parseFloat(scs2.paddingRight) || 0
+          max = Math.max(0, (scroller.clientWidth || 0) - padL2 - padR2)
+        } else if (shell.clientWidth) {
+          max = shell.clientWidth
+        }
+        max = Math.max(640, max || 920)
         var base = contentW
         var originX = event.clientX
         var latest = contentW
@@ -2544,7 +2633,16 @@ body[data-ds-dark-theme] .dm-dg-fs-item.active { background:rgba(88,166,255,.28)
 
       return h('div', { className: 'dm-page' },
         h('style', null, PAGE_CSS),
-        h('div', { className: 'dm-content-shell', ref: shellRef, style: { '--dm-content-w': contentW + 'px' } },
+        h('div', {
+          className: 'dm-content-shell',
+          ref: shellRef,
+          style: {
+            '--dm-content-w': contentW + 'px',
+            '--dm-sb-pad': sbPad + 'px',
+            '--dm-bar-l': (geo ? geo.l : -100) + 'px',
+            '--dm-bar-r': (geo ? geo.r : -100) + 'px'
+          }
+        },
           h('div', { className: 'dm-width-handle', 'data-side': 'left', title: '拖拽调整内容宽度（双击恢复默认）', onPointerDown: function (event) { beginWidthDrag('left', event) }, onDoubleClick: resetContentWidth }),
           h('div', { className: 'dm-width-handle', 'data-side': 'right', title: '拖拽调整内容宽度（双击恢复默认）', onPointerDown: function (event) { beginWidthDrag('right', event) }, onDoubleClick: resetContentWidth }),
           h('div', { className: 'dm-content-scroll' },
