@@ -3161,6 +3161,12 @@ body[data-ds-dark-theme] .dm-dg-fs-item.active { background:rgba(88,166,255,.28)
 .dm-body { flex:1; min-height:0; align-items:stretch; }
 .dm-content-scroll { overflow:hidden; }
 .dm-pane { min-height:0; overflow:auto; padding-right:4px; }
+/* 拖窄到单列时：容器查询改不了容器外的 scroll，必须由页面级类切换 */
+.dm-page.dm-narrow .dm-content-shell .dm-content-scroll { overflow:auto; }
+.dm-page.dm-narrow .dm-content { height:auto; }
+.dm-page.dm-narrow .dm-content > .dm-root { height:auto; }
+.dm-page.dm-narrow .dm-body { display:block; flex:none; }
+.dm-page.dm-narrow .dm-pane { overflow:visible; padding-right:0; }
 .dm-pub-tabs { display:flex; gap:5px; margin-bottom:7px; }
 .dm-pub-tab { font-size:11.5px; padding:4px 11px; border-radius:7px; border:1px solid rgba(128,128,128,.32); background:transparent; color:inherit; cursor:pointer; }
 .dm-pub-tab.active { border-color:rgba(88,166,255,.65); color:#3b82d6; background:rgba(88,166,255,.1); }
@@ -3368,7 +3374,7 @@ body[data-ds-dark-theme] .dm-dg-fs-item.active { background:rgba(88,166,255,.28)
         try { window.localStorage.removeItem('dsh-mesh.contentWidth') } catch (error) { /* ignore */ }
       }
 
-      return h('div', { className: 'dm-page' },
+      return h('div', { className: 'dm-page' + (contentW > 0 && contentW < 860 ? ' dm-narrow' : '') },
         h('style', null, PAGE_CSS),
         h('div', {
           className: 'dm-content-shell',
