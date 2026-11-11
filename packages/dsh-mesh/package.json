@@ -1,6 +1,6 @@
 {
   "name": "@linyanzhi/dsh-mesh",
-  "version": "0.3.32",
+  "version": "0.3.33",
   "description": "dsh-mesh main plugin: multi-device AI network topology in the DSH sidebar, with host bridge and server autostart installed as dependencies.",
   "type": "module",
   "main": "lib/index.js",

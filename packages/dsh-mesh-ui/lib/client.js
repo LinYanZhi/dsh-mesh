@@ -1381,9 +1381,24 @@ function deviceLinkState(data, peer, lanMap) {
       error: '待授权'
     }
   }))
-  // 2026-11-10：按共用顺序排序（与 Viewport 拖拽位置表一致，修复"拖 A 动 B"的 bug）
+  // 默认布局的交叉削减：按邻接服务器做 barycenter 排序，左侧公网 / 右侧 Sakura，本机放中间
   var orderKeys = orderedNodeKeys(data)
-  nodes.sort(function (a, b) { return orderKeys.indexOf(a.key) - orderKeys.indexOf(b.key) })
+  function nodeServerAffinity(node) {
+    if (node.candidate) return 1
+    if (node.sakuraTunnel) return 1
+    var t = node.tunnel || {}
+    if (t.kind === 'frp' || t.kind === 'wan') return 0
+    return 0.5
+  }
+  var localNodes = nodes.filter(function (n) { return n.local })
+  var restNodes = nodes.filter(function (n) { return !n.local })
+  restNodes.sort(function (a, b) {
+    var d = nodeServerAffinity(a) - nodeServerAffinity(b)
+    if (d !== 0) return d
+    return orderKeys.indexOf(a.key) - orderKeys.indexOf(b.key)
+  })
+  var mid = Math.floor(restNodes.length / 2)
+  nodes = restNodes.slice(0, mid).concat(localNodes, restNodes.slice(mid))
   // 基础设施节点（中转服务器）：阿里云 / 樱花
   var localPub = publicEntryFor(localTunnel)
   var selectedPublic = selectedPublicServer()
