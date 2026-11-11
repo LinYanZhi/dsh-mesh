@@ -1912,22 +1912,33 @@ function deviceLinkState(data, peer, lanMap) {
       var rs = useState(null); var result = rs[0]; var setResult = rs[1]
       var bs = useState(false); var busy = bs[0]; var setBusy = bs[1]
       var msgs = useState(''); var msg = msgs[0]; var setMsg = msgs[1]
+      var jcs = useState(''); var joinCode = jcs[0]; var setJoinCode = jcs[1]
+      var jns = useState(''); var joinName = jns[0]; var setJoinName = jns[1]
+      var jms = useState(''); var joinMsg = jms[0]; var setJoinMsg = jms[1]
 
       var tunnels = (props.data && props.data.tunnels) || {}
+      var meshPort = Number((props.data && props.data.endpoint && props.data.endpoint.port) || (props.data && props.data.localTunnel && props.data.localTunnel.port) || 8124)
       var sakuraEndpoints = []
-      function addEndpoint(name, h, p, up, note) {
+      function addEndpoint(name, h, p, up, note, localPort) {
         h = String(h || ''); p = String(p || '')
         if (!h || !p) return
+        var lp = Number(localPort) || null
+        var meshName = /(dsh|mesh)/i.test(String(name || '') + ' ' + String(note || ''))
+        var isMesh = lp ? (lp === meshPort || lp === 8124 || lp === 8126 || meshName) : meshName
         var found = sakuraEndpoints.filter(function (x) { return x.host === h && x.port === p })[0]
-        if (found) { if (note && !found.note) found.note = note; return }
-        sakuraEndpoints.push({ name: name || '樱花隧道', host: h, port: p, up: up === true, note: note || '' })
+        if (found) {
+          if (note && !found.note) found.note = note
+          if (lp && !found.localPort) { found.localPort = lp; found.mesh = isMesh }
+          return
+        }
+        sakuraEndpoints.push({ name: name || '樱花隧道', host: h, port: p, up: up === true, note: note || '', localPort: lp, mesh: isMesh })
       }
-      // 优先读账号 API（含 note 备注），再合并本机日志里的隧道
+      // 优先读账号 API（含 note 备注、localPort 类型），再合并本机日志里的隧道
       ;(tunnels.sakuraAccount && tunnels.sakuraAccount.tunnels || []).forEach(function (t) {
-        if (t.host && t.port) addEndpoint(t.name, t.host, t.port, t.online === true, t.note)
-        else if (t.addr) { var m = /^([^:]+):(\d+)$/.exec(String(t.addr)); if (m) addEndpoint(t.name, m[1], m[2], t.online === true, t.note) }
+        if (t.host && t.port) addEndpoint(t.name, t.host, t.port, t.online === true, t.note, t.localPort)
+        else if (t.addr) { var m = /^([^:]+):(\d+)$/.exec(String(t.addr)); if (m) addEndpoint(t.name, m[1], m[2], t.online === true, t.note, t.localPort) }
       })
-      ;(tunnels.sakura && tunnels.sakura.tunnels || []).forEach(function (t) { addEndpoint(t.name, t.host, t.port, t.probe && t.probe.up, t.note) })
+      ;(tunnels.sakura && tunnels.sakura.tunnels || []).forEach(function (t) { addEndpoint(t.name, t.host, t.port, t.probe && t.probe.up, t.note, t.localPort) })
 
       function persist(nextMode, nextHost, nextPort) {
         try { window.localStorage.setItem('dsh-mesh-ui.publicConnection.v2', JSON.stringify({ mode: nextMode, host: nextHost, port: nextPort })) } catch (_) {}
@@ -1955,10 +1966,27 @@ function deviceLinkState(data, peer, lanMap) {
         setMode(next); setResult(null); setMsg(''); persist(next, host, port)
       }
       function autoSakura() {
-        var online = sakuraEndpoints.filter(function (x) { return x.up })[0] || sakuraEndpoints[0]
-        if (!online) { setMsg('本机没有检测到樱花隧道入口'); return }
+        var online = sakuraEndpoints.filter(function (x) { return x.mesh !== false && x.up })[0] ||
+          sakuraEndpoints.filter(function (x) { return x.mesh !== false })[0]
+        if (!online) { setMsg('没有检测到 dsh-mesh 类型的樱花隧道（MC/其他服务不会被自动加入）'); return }
         setHost(online.host); setPort(online.port); persist(mode, online.host, online.port)
         runProbe(online.host, online.port, true)
+      }
+      function joinNetwork() {
+        if (!result || !result.host || !result.compatible) { setJoinMsg('先在协议检测通过后才能加入'); return }
+        var code = String(joinCode || '').trim()
+        if (!code) { setJoinMsg('请输入对方生成的一次性配对码'); return }
+        var scheme = proto && proto.channel === 'http' ? 'http' : 'https'
+        var name = String(joinName || (proto && (proto.node || proto.version)) || result.host).trim()
+        setBusy(true); setJoinMsg('')
+        jsonFetch('/api/dsh-mesh/lan/pair', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ url: scheme + '://' + result.host + ':' + result.port, code: code, name: name, fingerprint: (result.tls && result.tls.fingerprint256) || '' }) })
+          .then(function (j) {
+            if (j.ok) {
+              setJoinMsg('已加入拓扑：' + name + '，正在刷新…')
+              setJoinCode('')
+              if (props.onChanged) props.onChanged()
+            } else setJoinMsg(String(j.stderr || j.error || j.stdout || '加入失败').slice(0, 300))
+          }).catch(function (e) { setJoinMsg(String(e.message || e)) }).finally(function () { setBusy(false) })
       }
       function row(k, v, tone) {
         if (v == null || v === '') return null
@@ -2013,13 +2041,14 @@ function deviceLinkState(data, peer, lanMap) {
             h('div', { className: 'dm-sub' }, '自动读取本机樱花隧道入口，并检测它是否能响应 dsh-mesh 协议。'),
             sakuraEndpoints.length
               ? h('table', { className: 'dm-lan-table dm-sakura-table' },
-                h('thead', null, h('tr', null, h('th', null, '隧道'), h('th', null, '备注'), h('th', null, '地址'), h('th', null, '状态'), h('th', null, '操作'))),
+                h('thead', null, h('tr', null, h('th', null, '隧道'), h('th', null, '备注'), h('th', null, '地址'), h('th', null, '本地端口'), h('th', null, '状态'), h('th', null, '操作'))),
                 h('tbody', null, sakuraEndpoints.map(function (it, i) {
                   return h('tr', { key: i },
                     h('td', { title: it.name }, it.name),
                     h('td', { className: 'dm-sakura-note', title: it.note || '' }, it.note || '—'),
                     h('td', { className: 'dm-mono' }, it.host + ':' + it.port),
-                    h('td', null, h('span', { className: 'dm-chip ' + (it.up ? 'ok' : 'muted') }, it.up ? '在线' : '未探测')),
+                    h('td', { className: 'dm-mono' }, it.localPort || '—'),
+                    h('td', null, h('span', { className: 'dm-chip ' + (it.up ? 'ok' : 'muted') }, it.up ? '在线' : '未探测'), it.mesh === false ? h('span', { className: 'dm-chip bad', style: { marginLeft: 4 } }, '非 mesh') : null),
                     h('td', { className: 'dm-lan-actions' }, h('button', { className: 'dm-btn', disabled: busy, onClick: function () { setHost(it.host); setPort(it.port); persist(mode, it.host, it.port); runProbe(it.host, it.port, true) } }, '检测'))
                   )
                 }))
@@ -2045,6 +2074,15 @@ function deviceLinkState(data, peer, lanMap) {
             sak.matches && sak.matches.length ? sak.matches.map(function (m, i) {
               return h('div', { className: 'dm-public-row', key: i }, h('span', { className: 'dm-public-k' }, '匹配'), h('span', { className: 'dm-public-v good' }, m.name + ' · ' + m.host + ':' + m.port + (m.up ? ' · 在线' : ' · 离线')))
             }) : null
+          , result.compatible ? h('div', { className: 'dm-join' },
+            h('div', { className: 'dm-sub' }, '协议检测通过。需要对方生成的一次性配对码，才能把它加入当前拓扑：'),
+            h('div', { className: 'dm-public-form' },
+              h('input', { type: 'text', value: joinCode, placeholder: '一次性配对码', onChange: function (e) { setJoinCode(e.target.value) } }),
+              h('input', { type: 'text', value: joinName, placeholder: '可选：节点名称', onChange: function (e) { setJoinName(e.target.value) } }),
+              h('button', { className: 'dm-btn primary', disabled: busy, onClick: joinNetwork }, busy ? '加入中…' : '加入拓扑')
+            ),
+            joinMsg ? h('div', { className: 'dm-sub dm-public-msg' }, joinMsg) : null
+          ) : null
           ) : null
         ) : null
       )
@@ -2476,7 +2514,7 @@ function deviceLinkState(data, peer, lanMap) {
             h(Details, { title: '面板管理', badge: '显示 / 隐藏' }, h(PanelManager, { items: PANEL_ITEMS, hidden: hiddenPanels, onToggle: togglePanel })),
             !hiddenPanels.usage ? h(Details, { title: '使用说明' }, h(UsageHelpV2)) : null,
             !hiddenPanels.lan ? h(Details, { title: '局域网连接', badge: '扫描 / 配对' }, h(LanOnboarding, { onChanged: function () { load(true) } })) : null,
-            !hiddenPanels.public ? h(Details, { title: '公网连接', badge: '直连 / 樱花' }, h(PublicConnection, { data: data })) : null,
+            !hiddenPanels.public ? h(Details, { title: '公网连接', badge: '直连 / 樱花' }, h(PublicConnection, { data: data, onChanged: function () { load(true) } })) : null,
             !hiddenPanels.nodes ? h(Details, { title: '节点管理', badge: '仅本机生效' }, h(NodeManager, { onChanged: function () { load(true) } })) : null,
             !hiddenPanels.permissions ? h(Details, { title: '权限设置', badge: '本机 ACL' }, h(PermissionsPanel)) : null,
             !hiddenPanels.transfers ? h(Details, { title: '文件传输', badge: '历史' }, h(TransferHistory)) : null,
@@ -3217,6 +3255,7 @@ body[data-ds-dark-theme] .dm-dg-fs-item.active { background:rgba(88,166,255,.28)
 .dm-public-v.muted { opacity:.6; }
 .dm-public-msg { margin-top:6px; color:#c9362c; }
 .dm-public-sakura { margin-top:7px; padding-top:6px; border-top:1px dashed rgba(128,128,128,.2); }
+.dm-join { margin-top:8px; padding-top:8px; border-top:1px dashed rgba(128,128,128,.28); }
 .dm-content, .dm-content > .dm-root { height:100%; min-height:0; }
 .dm-root { display:flex; flex-direction:column; min-height:0; }
 .dm-head, .dm-foot { flex:none; }
