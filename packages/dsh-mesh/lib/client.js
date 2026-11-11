@@ -1176,10 +1176,7 @@ function sakuraAccountOf(data) {
     base.online = list.filter(function (x) { return x.online }).length
     base.tunnels = list
   }
-  var port = Number(data && data.localTunnel && data.localTunnel.port)
-  var filtered = list
-  if (port) filtered = list.filter(function (x) { return x.localPort == null || Number(x.localPort) === port })
-  return Object.assign({}, base, { tunnels: filtered, total: filtered.length, online: filtered.filter(function (x) { return x.online }).length })
+  return Object.assign({}, base, { tunnels: list, total: list.length, online: list.filter(function (x) { return x.online }).length })
 }
 function sakuraTunnelOf(data, devKey, peer) {
   var acc = sakuraAccountOf(data)
