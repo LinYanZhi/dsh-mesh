@@ -79,9 +79,22 @@ window.__ModuleLoader__.load({
     })
     return order.map(function (k) { return byKey[k] })
   }
+    var DISABLED_PEERS_KEY = 'dsh-mesh-ui.disabledPeers.v1'
+    function disabledPeerNames() {
+      try { var list = JSON.parse(window.localStorage.getItem(DISABLED_PEERS_KEY) || '[]'); return Array.isArray(list) ? list : [] } catch (e) { return [] }
+    }
+    function setDisabledPeerNames(list) {
+      try { if (list && list.length) window.localStorage.setItem(DISABLED_PEERS_KEY, JSON.stringify(list)); else window.localStorage.removeItem(DISABLED_PEERS_KEY) } catch (e) { /* ignore */ }
+    }
 function filterSelfPeers(list, nodeName) {
     var selfKey = peerDeviceKey(nodeName)
-    return (list || []).filter(function (peer) { return !selfKey || peerDeviceKey(peer.name) !== selfKey })
+    var disabled = disabledPeerNames().map(function (x) { return String(x).toLowerCase() })
+    return (list || []).filter(function (peer) {
+      if (selfKey && peerDeviceKey(peer.name) === selfKey) return false
+      var name = String(peer.name || '').toLowerCase()
+      var id = String(peer.id || '').toLowerCase()
+      return disabled.indexOf(name) < 0 && disabled.indexOf(id) < 0
+    })
   }
 function nodeLabel(name) { return NODE_LABELS[String(name || '').toLowerCase()] || String(name || '未知节点') }
     // [layout-helpers-begin] 2026-11-09 拓扑自定义布局：节点 key 顺序 + localStorage 持久化 + clamp
@@ -1859,14 +1872,26 @@ function deviceLinkState(data, peer, lanMap) {
       function refresh() {
         setBusy(true)
         jsonFetch('/api/dsh-mesh/peers').then(function (r) {
-          if (r.ok) setPeers(r.peers || []); else setMsg(r.error || '读取节点失败')
+          if (r.ok) {
+            setPeers(r.peers || [])
+            setDisabledPeerNames((r.peers || []).filter(function (p) { return p.disabled === true }).map(function (p) { return p.name || p.id }))
+          } else setMsg(r.error || '读取节点失败')
         }).catch(function (e) { setMsg(String(e.message || e)) }).finally(function () { setBusy(false) })
       }
       useEffect(function () { refresh() }, [])
       function togglePeer(peer) {
+        var nextDisabled = !peer.disabled
         setBusy(true); setMsg('')
-        jsonFetch('/api/dsh-mesh/peers/toggle', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: peer.id, disabled: !peer.disabled }) })
-          .then(function (j) { setMsg(j.ok ? ((peer.disabled ? '已启用 ' : '已禁用 ') + peer.name) : ('操作失败：' + (j.stderr || j.error || '').slice(0, 200))); refresh(); if (props.onChanged) props.onChanged() })
+        jsonFetch('/api/dsh-mesh/peers/toggle', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: peer.id, disabled: nextDisabled }) })
+          .then(function (j) {
+            if (j.ok) {
+              var list = disabledPeerNames().filter(function (x) { return x !== peer.name && x !== peer.id })
+              if (nextDisabled) list.push(peer.name || peer.id)
+              setDisabledPeerNames(list)
+              setMsg(nextDisabled ? '已禁用 ' + peer.name : '已启用 ' + peer.name)
+            } else setMsg('操作失败：' + (j.stderr || j.error || '').slice(0, 200))
+            refresh(); if (props.onChanged) props.onChanged()
+          })
           .catch(function (e) { setMsg(String(e.message || e)) }).finally(function () { setBusy(false) })
       }
       function removePeer(peer) {
@@ -2735,7 +2760,7 @@ function deviceLinkState(data, peer, lanMap) {
             !hiddenPanels.usage ? h(Details, { title: '使用说明' }, h(UsageHelpV2)) : null,
             !hiddenPanels.lan ? h(Details, { title: '局域网连接', badge: '扫描 / 配对' }, h(LanOnboarding, { onChanged: function () { load(true) } })) : null,
             !hiddenPanels.public ? h(Details, { title: '公网连接', badge: '直连 / 樱花' }, h(PublicConnection, { data: data, onChanged: topologyChanged })) : null,
-            !hiddenPanels.nodes ? h(Details, { title: '节点管理', badge: '仅本机生效' }, h(NodeManager, { onChanged: function () { load(true) } })) : null,
+            !hiddenPanels.nodes ? h(Details, { title: '节点管理', badge: '仅本机生效' }, h(NodeManager, { onChanged: topologyChanged })) : null,
             !hiddenPanels.permissions ? h(Details, { title: '权限设置', badge: '本机 ACL' }, h(PermissionsPanel)) : null,
             !hiddenPanels.transfers ? h(Details, { title: '文件传输', badge: '历史' }, h(TransferHistory)) : null,
             !hiddenPanels.instances ? h(Details, { title: '本机实例', badge: ((data.local && data.local.instances) || []).length }, h(InstanceList, { data: data })) : null,

@@ -382,7 +382,7 @@ export function apply(ctx) {
 
   const peersListRoute = readonlyRoute('/api/dsh-mesh/peers', async () => {
     const r = await runCli(['peer', 'list'])
-    try { const data = JSON.parse(r.stdout); return { ok: true, peers: (data.peers || []).map((p) => ({ id: p.id, name: p.name, url: p.url, addedAt: p.addedAt || null })) } } catch { return { ok: false, error: 'invalid peer list', stderr: r.stderr } }
+    try { const data = JSON.parse(r.stdout); return { ok: true, peers: (data.peers || []).map((p) => ({ id: p.id, name: p.name, url: p.url, addedAt: p.addedAt || null, disabled: Boolean(p.disabled) })) } } catch { return { ok: false, error: 'invalid peer list', stderr: r.stderr } }
   })
   const peersRemoveRoute = {
     kind: 'exact', path: '/api/dsh-mesh/peers/remove',
