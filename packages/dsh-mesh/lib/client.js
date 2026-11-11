@@ -1567,10 +1567,25 @@ function deviceLinkState(data, peer, lanMap) {
       for (var ni = 0; ni < nodes.length; ni++) if (peerDeviceKey(nodes[ni].devKey) === peerDeviceKey(item.via)) { gi = ni; break }
       if (gi < 0) return
       var gp = layout.positions[gi]
-      var idx = fedItems.length
-      fedItems.push({ item: item, x: gp[0] + (idx % 3 - 1) * 170, y: gp[1] + 150 + Math.floor(idx / 3) * 92, gx: gp[0], gy: gp[1] })
+      fedItems.push({ item: item, x: gp[0], y: gp[1], gx: gp[0], gy: gp[1] })
     })
   } catch (error) { fedItems = [] }
+  // 简单分层布局：只读间接设备按网关分组，居中成行，超过 3 个换行
+  var fedGroups = {}
+  fedItems.forEach(function (fed) { var gk = String(fed.item.via || 'local'); (fedGroups[gk] = fedGroups[gk] || []).push(fed) })
+  Object.keys(fedGroups).forEach(function (gk) {
+    var group = fedGroups[gk]
+    var cols = Math.min(3, group.length)
+    group.forEach(function (fed, idx) {
+      var col = idx % cols
+      var row = Math.floor(idx / cols)
+      fed.x = fed.gx + (col - (cols - 1) / 2) * 190
+      fed.y = fed.gy + 150 + row * 92
+    })
+  })
+  var maxFedX = layout.W, maxFedY = layout.H
+  fedItems.forEach(function (fed) { maxFedX = Math.max(maxFedX, fed.x + 120); maxFedY = Math.max(maxFedY, fed.y + 80) })
+  layout.W = Math.ceil(maxFedX); layout.H = Math.ceil(maxFedY)
   fedItems.forEach(function (fed) {
     svgEls.push(h('line', { key: 'fed-edge-' + fed.item.name + '-' + fed.item.via, x1: fed.gx, y1: fed.gy, x2: fed.x, y2: fed.y, className: 'dm-edge-indirect', strokeDasharray: '4 4' }))
   })
