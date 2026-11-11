@@ -854,7 +854,7 @@ body.light .dm-edge-label { stroke: rgba(255,255,255,.92); }
           h('div', { className: 'dm-world-outer', style: { transform: 'translate(' + view.x + 'px,' + view.y + 'px)' } },
             h('div', { className: 'dm-world', style: Object.assign({ width: effLayout.W + 'px', height: effLayout.H + 'px' },
               SUPPORTS_ZOOM ? { zoom: view.scale } : { transform: 'scale(' + view.scale + ')' }) },
-              h(Topology, { data: props.data, layout: effLayout, selectedKey: props.selectedKey, onSelect: props.onSelect, scale: view.scale, onNodeMove: moveNode, onDragEdge: autoPanAt, onCardSize: onCardSize, show: showFilters, federated: props.federated, onInfraBounds: onInfraBounds, resetNonce: resetNonce })
+              h(Topology, { data: props.data, layout: effLayout, selectedKey: props.selectedKey, onSelect: props.onSelect, scale: view.scale, onNodeMove: moveNode, onDragEdge: autoPanAt, onCardSize: onCardSize, show: showFilters, federated: props.federated, onInfraBounds: onInfraBounds, resetNonce: resetNonce, movedLayout: movedLayout })
             )
           ),
           h('div', { className: 'dm-zoom' },
@@ -1621,7 +1621,22 @@ function deviceLinkState(data, peer, lanMap) {
     }),
     fedItems.map(function (fed) {
       var item = fed.item
-      return h('div', { key: 'fed:' + item.via + ':' + item.name, className: 'dm-card-node indirect', style: { left: fed.x + 'px', top: fed.y + 'px', width: '172px', transform: 'translate(-50%,-50%)' }, title: '间接可达：经 ' + item.via },
+      var fedKey = 'fed:' + item.via + ':' + item.name
+      var moved = props.movedLayout && props.movedLayout[fedKey]
+      var fx = moved && moved.length === 2 ? Number(moved[0]) : fed.x
+      var fy = moved && moved.length === 2 ? Number(moved[1]) : fed.y
+      return h('div', {
+        key: fedKey,
+        className: 'dm-card-node indirect draggable' + (props.selectedKey === fedKey ? ' selected' : '') + (hoverKey === fedKey ? ' hovered' : '') + (dragKey === fedKey ? ' dragging' : ''),
+        style: { left: fx + 'px', top: fy + 'px', width: '172px', transform: 'translate(-50%,-50%)' },
+        title: '间接可达：经 ' + item.via + '（可拖拽）',
+        onMouseEnter: function () { setHoverKey(fedKey) },
+        onMouseLeave: function () { setHoverKey(null) },
+        onPointerDown: function (event) { cardPointerDown({ key: fedKey }, [fx, fy], event) },
+        onPointerMove: function (event) { cardPointerMove({ key: fedKey }, event) },
+        onPointerUp: function (event) { cardPointerUp({ key: fedKey }, event) },
+        onPointerCancel: cardPointerCancel
+      },
         h('div', { className: 'dm-n-head' },
           h('div', { className: 'dm-n-name' }, h('span', { className: 'dm-dot ' + (item.up === true ? 'ok' : (item.up === false ? 'bad' : 'muted')), style: item.up == null ? { opacity: .45 } : undefined }), h('span', { className: 'dm-ell' }, item.name)),
           h('span', { className: 'dm-fed-badge' }, '经 ' + item.via)
