@@ -2208,10 +2208,6 @@ function deviceLinkState(data, peer, lanMap) {
                 h('button', { className: 'dm-btn', disabled: busy, onClick: function () { setVerifyTarget(null); setVerifyCode('') } }, '取消')
               )
             ) : null,
-            h('div', { className: 'dm-lan-row' },
-              h('button', { className: 'dm-btn primary', disabled: busy || !sakuraEndpoints.length, onClick: autoSakura }, busy ? '检测中…' : '自动检测樱花隧道'),
-              h('span', { className: 'dm-sub' }, '优先选择在线隧道；只读探测，不会打开或切换隧道。')
-            )
           ),
         msg ? h('div', { className: 'dm-sub dm-public-msg' }, msg) : null,
         result && result.host ? h('div', { className: 'dm-public-res' },
@@ -2308,7 +2304,7 @@ function deviceLinkState(data, peer, lanMap) {
       return h('div', { className: 'dm-usage' },
         h('p', null, '这个页面显示当前 AI 网络里有哪些设备、它们是否在线，以及各条链路的状态。'),
         h('p', null, '局域网连接：先扫描，确认对方是你认识的设备，再输入对方生成的一次性配对码。扫描本身不会自动连接。'),
-        h('p', null, '公网连接：如果对方有公网 IP 或端口映射，直接填地址和端口检测；如果走樱花穿透，切到樱花模式自动检测隧道。'),
+        h('p', null, '公网连接：如果对方有公网 IP 或端口映射，直接填地址和端口检测；如果走樱花穿透，在隧道表格里逐条点“检测”。'),
         h('p', null, '节点管理和权限设置只影响本机；多设备同步目前还没有做，移除节点后不会自动通知其他设备。'),
         h('p', null, '拓扑图和设备卡片用来查看状态；右侧面板可以按需展开或隐藏，不影响真实链路。')
       )
