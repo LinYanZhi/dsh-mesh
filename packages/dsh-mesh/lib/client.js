@@ -493,6 +493,34 @@ body.light .dm-edge-label { stroke: rgba(255,255,255,.92); }
         else window.localStorage.removeItem(SAKURA_CANDIDATES_KEY)
       } catch (e) { /* ignore */ }
     }
+    function peerTunnelAddrs(data) {
+      var out = {}
+      ;((data && data.peers) || []).forEach(function (p) {
+        var t = p.tunnel || {}
+        if (t.host && t.port) out[String(t.host) + ':' + String(t.port)] = true
+        var m = /^[a-z]+:\/\/([^/:]+):(\d+)/i.exec(String(p.url || ''))
+        if (m) out[m[1] + ':' + m[2]] = true
+      })
+      return out
+    }
+    function reconcileMeshUiState(data) {
+      var selected = selectedSakuraServers()
+      var cands = sakuraCandidates()
+      if (!selected.length) {
+        if (cands.length) setSakuraCandidates([])
+        return
+      }
+      var allowed = {}
+      selected.forEach(function (s) {
+        (s.mesh || []).forEach(function (t) {
+          var port = t.remotePort || t.port
+          if (t.host && port) allowed[String(t.host) + ':' + String(port)] = true
+        })
+      })
+      var peers = peerTunnelAddrs(data)
+      var next = cands.filter(function (c) { return allowed[c.key] && !peers[c.key] })
+      if (next.length !== cands.length) setSakuraCandidates(next)
+    }
     function readSelectedServer(key) {
       try { return JSON.parse(window.localStorage.getItem(key) || 'null') } catch (e) { return null }
     }
@@ -2592,6 +2620,15 @@ function deviceLinkState(data, peer, lanMap) {
         setTopoNonce(function (n) { return n + 1 })
         load(false)
       }
+      useEffect(function () { reconcileMeshUiState(data) }, [data])
+      useEffect(function () {
+        if (!data || !data.at) return
+        jsonFetch('/api/dsh-mesh/peers').then(function (r) {
+          if (!r || !r.ok) return
+          setDisabledPeerNames((r.peers || []).filter(function (p) { return p.disabled === true }).map(function (p) { return p.name || p.id }))
+          setTopoNonce(function (n) { return n + 1 })
+        }).catch(function () { /* best effort */ })
+      }, [data && data.at])
       var panelState = useState(function () {
         try { return JSON.parse(window.localStorage.getItem('dsh-mesh-ui.panels.v1') || '{}') || {} } catch (error) { return {} }
       })
@@ -2668,12 +2705,6 @@ function deviceLinkState(data, peer, lanMap) {
         var st = forceRef.current
         var now = Date.now()
         if (st.busy) return
-        if (now - st.at < 8000) {
-          var waitSec = Math.ceil((8000 - (now - st.at)) / 1000)
-          setRefreshHint("刚采集过，" + waitSec + "s 后可再刷新")
-          setTimeout(function () { setRefreshHint("") }, 2200)
-          return
-        }
         st.busy = true
         st.at = now
         setLoading(true)
@@ -2709,8 +2740,7 @@ function deviceLinkState(data, peer, lanMap) {
       useEffect(function () {
         load(false)
         var timer = setInterval(function () { setTick(function (n) { return n + 1 }) }, REFRESH_MS)
-        return function () { clearInterval(timer) }
-      }, [])
+        return function () { clearInterval(timer) }      }, [])
 
       useEffect(function () { if (tick > 0 && !forceRef.current.busy) load(false) }, [tick])
       useEffect(function () {
@@ -2763,14 +2793,13 @@ function deviceLinkState(data, peer, lanMap) {
         h('div', { className: 'dm-body', style: splitW > 0 ? { '--dm-main-w': splitW + 'px' } : undefined },
           h('div', { className: 'dm-pane' },
             h(Viewport, { data: data, federated: federated, topoNonce: topoNonce, layout: computeLayout(1 + filterSelfPeers(dedupePeers(data.peers || []), data.nodeName).length + sakuraCandidates().length), selectedKey: selectedKey, onSelect: setSelectedKey }),
-            h(InfraPanels, { data: data }),
             h(DeviceDetails, { data: data, selectedKey: selectedKey })
           ),
           h('div', { className: 'dm-divider', onPointerDown: startSplit, title: '↔ 拖拽调整左右宽度（双击恢复默认）', onDoubleClick: function () { setSplitW(0); try { window.localStorage.removeItem('dsh-mesh-split-w') } catch (error) { /* ignore */ } } }),
           h('div', { className: 'dm-pane' },
             h(Details, { title: '面板管理', badge: '显示 / 隐藏' }, h(PanelManager, { items: PANEL_ITEMS, hidden: hiddenPanels, onToggle: togglePanel })),
             !hiddenPanels.usage ? h(Details, { title: '使用说明' }, h(UsageHelpV2)) : null,
-            !hiddenPanels.lan ? h(Details, { title: '局域网连接', badge: '扫描 / 配对' }, h(LanOnboarding, { onChanged: function () { load(true) } })) : null,
+            !hiddenPanels.lan ? h(Details, { title: '局域网连接', badge: '扫描 / 配对' }, h(LanOnboarding, { onChanged: topologyChanged })) : null,
             !hiddenPanels.public ? h(Details, { title: '公网连接', badge: '直连 / 樱花' }, h(PublicConnection, { data: data, onChanged: topologyChanged })) : null,
             !hiddenPanels.nodes ? h(Details, { title: '节点管理', badge: '仅本机生效' }, h(NodeManager, { onChanged: topologyChanged })) : null,
             !hiddenPanels.permissions ? h(Details, { title: '权限设置', badge: '本机 ACL' }, h(PermissionsPanel)) : null,
