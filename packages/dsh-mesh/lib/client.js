@@ -346,6 +346,7 @@ body.light .dm-edge-label { stroke: rgba(255,255,255,.92); }
 .dm-chip.warn { border-color:rgba(210,153,34,.5); color:#9a6c12; opacity:1; }
 .dm-chip.bad { border-color:rgba(248,81,73,.5); color:#c9362c; opacity:1; }
 .dm-chip.ok { border-color:rgba(63,185,80,.4); color:#2e9e4f; opacity:1; }
+.dm-chip.link { border-color:rgba(163,113,247,.45); color:#8b5cf6; opacity:1; }
 
 /* 画布浮层控件 */
 .dm-zoom { position:absolute; right:8px; bottom:8px; display:flex; gap:5px; padding:4px; border-radius:9px;
@@ -1562,8 +1563,8 @@ function deviceLinkState(data, peer, lanMap) {
     var sizeN = sizeOf(n.key)
     // Sakura 服务器未加入拓扑时，peer 仍然通过 Sakura 隧道连到本机；不画这条边会让 peer 子树变成独立树
     if (!sakuraVisible && n.sakuraTunnel) {
-      var directTunnel = { label: '已连接', short: 'LINK', color: '#8b949e', dash: true }
-      svgEls = svgEls.concat(curve('sak-direct' + i, layout.positions[localNodeIdx], pa, n.sakuraUp === true, directTunnel, '', sizeOf('local'), sizeN, edgeRelated('local', n.key)))
+      var directTunnel = { label: 'Sakura 隧道', short: 'SAK', color: TRANSPORTS.sakura.color, dash: true }
+      svgEls = svgEls.concat(curve('sak-direct' + i, layout.positions[localNodeIdx], pa, n.sakuraUp === true, directTunnel, 'Sakura 隧道', sizeOf('local'), sizeN, edgeRelated('local', n.key)))
     }
     if (publicVisible && !n.sakuraTunnel && n.tunnel && n.tunnel.host && !isLanPeer(n) && (n.tunnel.kind === 'frp' || n.tunnel.kind === 'wan')) svgEls = svgEls.concat(curve('pub' + i, pa, aliyunPos, n.publicUp, TRANSPORTS.public, maskHost(n.tunnel.host) + ((n.tunnel.port) ? ':' + n.tunnel.port : ''), sizeN, aliyunSize, edgeRelated(n.key, 'server-aliyun')))
     if (sakuraVisible && n.sakuraTunnel) svgEls = svgEls.concat(curve('sak' + i, pa, sakuraPos, n.sakuraUp === true, TRANSPORTS.sakura, maskText(n.sakuraTunnel.addr || ''), sizeN, sakuraSize, edgeRelated(n.key, 'server-sakura')))
@@ -1575,6 +1576,13 @@ function deviceLinkState(data, peer, lanMap) {
     nodes.map(function (node, i) {
       var pos = layout.positions[i]
       var selected = props.selectedKey === node.key
+      var linkKinds = []
+      if (!node.local && !node.candidate) {
+        if (node.lanUp) linkKinds.push('LAN')
+        if (node.sakuraTunnel) linkKinds.push('Sakura')
+        var lt = node.tunnel || {}
+        if (!node.lanUp && !node.sakuraTunnel && (lt.kind === 'frp' || lt.kind === 'wan')) linkKinds.push('公网')
+      }
       return h('div', {
         key: node.key,
         className: 'dm-card-node compact draggable' + (node.local ? ' local' : '') + (node.candidate ? ' candidate' : '') + (node.up ? '' : ' down') + (selected ? ' selected' : '') + (hoverKey === node.key ? ' hovered' : '') + (dragKey === node.key ? ' dragging' : ''),
@@ -1595,6 +1603,7 @@ function deviceLinkState(data, peer, lanMap) {
         ),
         node.up ? null : h('div', { className: 'dm-offline-row' }, '全部链路不可用' + (node.error ? ' · ' + node.error : '')),
         h('div', { className: 'dm-card-dsh' },
+          linkKinds.length ? h('span', { className: 'dm-chip link' }, linkKinds.join(' / ')) : null,
           (node.ports || []).map(function (item, pi) {
             var portUp = item.up == null ? node.up : Boolean(item.up)
             var bridgeUnknown = !portUp && node.up && !node.local
