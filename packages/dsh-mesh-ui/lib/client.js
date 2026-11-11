@@ -1549,48 +1549,6 @@ function deviceLinkState(data, peer, lanMap) {
     if (sakuraVisible && n.candidate) svgEls = svgEls.concat(curve('cand' + i, pa, sakuraPos, false, TRANSPORTS.sakura, maskText(n.tunnel.addr || ''), sizeN, sakuraSize, edgeRelated(n.key, 'server-sakura')))
     if (show.lan && n.lanUp) { var lt = n.lanTunnel || {}; var lanAddr = (lt.ip || lt.host || 'LAN') + (lt.port ? ':' + lt.port : ''); svgEls = svgEls.concat(curve('lan' + i, layout.positions[localNodeIdx], pa, n.lanUp, TRANSPORTS.lan, lanAddr, sizeOf('local'), sizeN, edgeRelated('local', n.key))) }
   })
-  var fedItems = []
-  try {
-    var directKeys = {}
-    nodes.forEach(function (n) { directKeys[peerDeviceKey(n.devKey)] = true; directKeys[peerDeviceKey(n.name)] = true })
-    var seenFed = {}
-    var fedRaw = (props.federated && props.federated.nodes) || []
-    fedRaw.forEach(function (item) {
-      var dn = peerDeviceKey(item.name)
-      if (!dn || directKeys[dn] || seenFed[dn] || dn === peerDeviceKey(data.nodeName)) return
-      seenFed[dn] = true
-      var gi = -1
-      for (var ni = 0; ni < nodes.length; ni++) if (peerDeviceKey(nodes[ni].devKey) === peerDeviceKey(item.via)) { gi = ni; break }
-      if (gi < 0) return
-      var gp = layout.positions[gi]
-      fedItems.push({ item: item, x: gp[0], y: gp[1], gx: gp[0], gy: gp[1] })
-    })
-  } catch (error) { fedItems = [] }
-  // 简单分层布局：只读间接设备按网关分组，居中成行，超过 3 个换行
-  var fedGroups = {}
-  fedItems.forEach(function (fed) { var gk = String(fed.item.via || 'local'); (fedGroups[gk] = fedGroups[gk] || []).push(fed) })
-  Object.keys(fedGroups).forEach(function (gk) {
-    var group = fedGroups[gk]
-    var cols = Math.min(3, group.length)
-    group.forEach(function (fed, idx) {
-      var col = idx % cols
-      var row = Math.floor(idx / cols)
-      fed.x = fed.gx + (col - (cols - 1) / 2) * 190
-      fed.y = fed.gy + 150 + row * 92
-    })
-  })
-  function fedPosition(fed) {
-    var key = 'fed:' + fed.item.via + ':' + fed.item.name
-    var moved = props.movedLayout && props.movedLayout[key]
-    return { key: key, x: moved && moved.length === 2 ? Number(moved[0]) : fed.x, y: moved && moved.length === 2 ? Number(moved[1]) : fed.y }
-  }
-  var maxFedX = layout.W, maxFedY = layout.H
-  fedItems.forEach(function (fed) { var fp = fedPosition(fed); maxFedX = Math.max(maxFedX, fp.x + 120); maxFedY = Math.max(maxFedY, fp.y + 80) })
-  layout.W = Math.ceil(maxFedX); layout.H = Math.ceil(maxFedY)
-  fedItems.forEach(function (fed) {
-    var fp = fedPosition(fed)
-    svgEls.push(h('line', { key: 'fed-edge-' + fed.item.name + '-' + fed.item.via, x1: fed.gx, y1: fed.gy, x2: fp.x, y2: fp.y, className: 'dm-edge-indirect', strokeDasharray: '4 4' }))
-  })
   return h('div', null,
     h('svg', { className: 'dm-lines', width: layout.W, height: layout.H, viewBox: '0 0 ' + layout.W + ' ' + layout.H }, svgEls),
     nodes.map(function (node, i) {
@@ -1621,33 +1579,6 @@ function deviceLinkState(data, peer, lanMap) {
             var bridgeUnknown = !portUp && node.up && !node.local
             return h('span', { key: pi, className: 'dm-chip type' + (portUp ? ' run' : (bridgeUnknown ? ' warn' : ' bad')), title: (portUp ? '实例在线' : (bridgeUnknown ? '节点在线，但 host bridge 未连接，实例状态未知' : (item.error ? 'host bridge 不可达：' + item.error : '实例离线 / host bridge 未连接'))) + ' · DSH 端口 ' + item.port }, String(item.port))
           })
-        )
-      )
-    }),
-    fedItems.map(function (fed) {
-      var item = fed.item
-      var fedKey = 'fed:' + item.via + ':' + item.name
-      var fp = fedPosition(fed)
-      var fx = fp.x
-      var fy = fp.y
-      return h('div', {
-        key: fedKey,
-        className: 'dm-card-node indirect draggable' + (props.selectedKey === fedKey ? ' selected' : '') + (hoverKey === fedKey ? ' hovered' : '') + (dragKey === fedKey ? ' dragging' : ''),
-        style: { left: fx + 'px', top: fy + 'px', width: '172px', transform: 'translate(-50%,-50%)' },
-        title: '间接可达：经 ' + item.via + '（可拖拽）',
-        onMouseEnter: function () { setHoverKey(fedKey) },
-        onMouseLeave: function () { setHoverKey(null) },
-        onPointerDown: function (event) { cardPointerDown({ key: fedKey }, [fx, fy], event) },
-        onPointerMove: function (event) { cardPointerMove({ key: fedKey }, event) },
-        onPointerUp: function (event) { cardPointerUp({ key: fedKey }, event) },
-        onPointerCancel: cardPointerCancel
-      },
-        h('div', { className: 'dm-n-head' },
-          h('div', { className: 'dm-n-name' }, h('span', { className: 'dm-dot ' + (item.up === true ? 'ok' : (item.up === false ? 'bad' : 'muted')), style: item.up == null ? { opacity: .45 } : undefined }), h('span', { className: 'dm-ell' }, item.name)),
-          h('span', { className: 'dm-fed-badge' }, '经 ' + item.via)
-        ),
-        h('div', { className: 'dm-card-dsh' },
-          h('span', { className: 'dm-chip' }, item.up === true ? (item.latencyMs != null ? item.latencyMs + 'ms' : '可达') : (item.up === false ? '不可达' : '间接 · 只读'))
         )
       )
     }),
