@@ -1963,6 +1963,8 @@ function deviceLinkState(data, peer, lanMap) {
       var ss = useState(selectedSakuraServer()); var selectedServer = ss[0]; var setSelectedServer = ss[1]
       var pss = useState(selectedPublicServer()); var selectedPublic = pss[0]; var setSelectedPublic = pss[1]
       var sgs = useState(selectedSakuraServers()); var selectedGroups = sgs[0]; var setSelectedGroups = sgs[1]
+      var vts = useState(null); var verifyTarget = vts[0]; var setVerifyTarget = vts[1]
+      var vcs = useState(''); var verifyCode = vcs[0]; var setVerifyCode = vcs[1]
 
       var tunnels = (props.data && props.data.tunnels) || {}
       var meshPort = Number((props.data && props.data.endpoint && props.data.endpoint.port) || (props.data && props.data.localTunnel && props.data.localTunnel.port) || 8124)
@@ -2009,13 +2011,16 @@ function deviceLinkState(data, peer, lanMap) {
           return pt.host === t.host && String(pt.port) === String(t.remotePort || t.port || '')
         })
       }
-      function verifyTunnel(t) {
-        var code = window.prompt('验证 mesh 节点「' + (t.name || tunnelAddr(t)) + '」\n请输入对方生成的一次性配对码：', '')
-        if (!code) return
+      function startVerify(t) { setVerifyTarget(t); setVerifyCode(''); setMsg('') }
+      function confirmVerify() {
+        var t = verifyTarget
+        var code = String(verifyCode || '').trim()
+        if (!t) return
+        if (!code) { setMsg('请输入对方生成的配对码'); return }
         setBusy(true); setMsg('')
-        jsonFetch('/api/dsh-mesh/lan/pair', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ url: 'https://' + tunnelAddr(t), code: String(code).trim(), name: t.note || t.name || t.host, fingerprint: '' }) })
+        jsonFetch('/api/dsh-mesh/lan/pair', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ url: 'https://' + tunnelAddr(t), code: code, name: t.note || t.name || t.host, fingerprint: '' }) })
           .then(function (j) {
-            if (j.ok) { setMsg('已验证并加入节点：' + (t.name || tunnelAddr(t))); if (props.onChanged) props.onChanged() }
+            if (j.ok) { setMsg('已验证并加入节点：' + (t.name || tunnelAddr(t))); setVerifyTarget(null); setVerifyCode(''); if (props.onChanged) props.onChanged() }
             else setMsg(String(j.stderr || j.error || j.stdout || '验证失败').slice(0, 300))
           }).catch(function (e) { setMsg(String(e.message || e)) }).finally(function () { setBusy(false) })
       }
@@ -2170,7 +2175,7 @@ function deviceLinkState(data, peer, lanMap) {
                       h('span', { className: 'dm-sub dm-mono' }, (t.addr || (t.host + ':' + t.remotePort))),
                       h('span', { className: 'dm-sub' }, t.note || ''),
                       h('span', { className: 'dm-chip ' + (verified ? 'ok' : 'muted') }, verified ? '已验证' : '待验证'),
-                      !verified ? h('button', { className: 'dm-btn', disabled: busy, onClick: function () { verifyTunnel(t) } }, '验证') : null
+                      !verified ? h('button', { className: 'dm-btn', disabled: busy, onClick: function () { startVerify(t) } }, '验证') : null
                     )
                   })
                 ) : null,
@@ -2185,23 +2190,14 @@ function deviceLinkState(data, peer, lanMap) {
                 ) : null
               )
             })) : h('div', { className: 'dm-empty' }, '未读取到 Sakura 服务器。'),
-            sakuraEndpoints.length
-              ? h('table', { className: 'dm-lan-table dm-sakura-table' },
-                h('thead', null, h('tr', null, h('th', null, '隧道'), h('th', null, '备注'), h('th', null, '地址'), h('th', null, '本地端口'), h('th', null, '状态'), h('th', null, '操作'))),
-                h('tbody', null, sakuraEndpoints.map(function (it, i) {
-                  return h('tr', { key: i },
-                    h('td', { title: it.name }, it.name),
-                    h('td', { className: 'dm-sakura-note', title: it.note || '' }, it.note || '—'),
-                    h('td', { className: 'dm-mono' }, it.host + ':' + it.port),
-                    h('td', { className: 'dm-mono' }, it.localPort || '—'),
-                    h('td', null, h('span', { className: 'dm-chip ' + (it.up ? 'ok' : 'muted') }, it.up ? '在线' : '未探测'), it.mesh === false ? h('span', { className: 'dm-chip bad', style: { marginLeft: 4 } }, '非 mesh') : null),
-                    h('td', { className: 'dm-lan-actions' },
-                      h('button', { className: 'dm-btn', disabled: busy, onClick: function () { setHost(it.host); setPort(it.port); persist(mode, it.host, it.port); runProbe(it.host, it.port, true) } }, '检测')
-                    )
-                  )
-                }))
+            verifyTarget ? h('div', { className: 'dm-verify-form' },
+              h('div', { className: 'dm-sub' }, '验证节点：' + (verifyTarget.name || tunnelAddr(verifyTarget)) + ' · 输入对方生成的一次性配对码'),
+              h('div', { className: 'dm-public-form' },
+                h('input', { type: 'text', value: verifyCode, placeholder: '一次性配对码', onChange: function (e) { setVerifyCode(e.target.value) }, onKeyDown: function (e) { if (e.key === 'Enter') confirmVerify() } }),
+                h('button', { className: 'dm-btn primary', disabled: busy, onClick: confirmVerify }, '验证并加入'),
+                h('button', { className: 'dm-btn', disabled: busy, onClick: function () { setVerifyTarget(null); setVerifyCode('') } }, '取消')
               )
-              : h('div', { className: 'dm-empty' }, '本机没有配置樱花隧道。'),
+            ) : null,
             h('div', { className: 'dm-lan-row' },
               h('button', { className: 'dm-btn primary', disabled: busy || !sakuraEndpoints.length, onClick: autoSakura }, busy ? '检测中…' : '自动检测樱花隧道'),
               h('span', { className: 'dm-sub' }, '优先选择在线隧道；只读探测，不会打开或切换隧道。')
@@ -3413,6 +3409,7 @@ body[data-ds-dark-theme] .dm-dg-fs-item.active { background:rgba(88,166,255,.28)
 .dm-sakura-tunnel-name { font-weight:600; }
 .dm-sakura-other { margin-top:5px; font-size:11px; }
 .dm-sakura-other > summary { cursor:pointer; opacity:.6; }
+.dm-verify-form { margin-top:7px; padding:7px 8px; border:1px solid rgba(88,166,255,.4); border-radius:8px; background:rgba(88,166,255,.07); }
 .dm-content, .dm-content > .dm-root { height:100%; min-height:0; }
 .dm-root { display:flex; flex-direction:column; min-height:0; }
 .dm-head, .dm-foot { flex:none; }
