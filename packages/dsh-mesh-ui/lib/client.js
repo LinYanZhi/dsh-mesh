@@ -452,7 +452,7 @@ body.light .dm-edge-label { stroke: rgba(255,255,255,.92); }
       var peers = filterSelfPeers(dedupePeers(d.peers || []), d.nodeName)
       var hasPublic = Boolean(publicEntryFor(d.localTunnel || {})) || peers.some(function (p) { var pt = p.tunnel || {}; return !isLanPeer(p) && Boolean(pt.host) && (pt.kind === 'frp' || pt.kind === 'wan') })
       var acc = sakuraAccountOf(d)
-      var hasSakura = Boolean(acc && (acc.tunnels || []).length)
+      var hasSakura = Boolean(acc && ((acc.tunnels || []).length || acc.error))
       return (s.public && hasPublic ? 1 : 0) + (s.sakura && hasSakura ? 1 : 0)
     }
 
@@ -1006,7 +1006,8 @@ function tunnelMatchesNode(port) {
 }
 function sakuraAccountOf(data) {
   var acc = data && data.tunnels && data.tunnels.sakuraAccount
-  if (!acc || acc.available !== true) return null
+  if (!acc) return null
+  if (acc.available !== true && !(acc.tunnels || []).length && !acc.error) return null
   var port = Number(data && data.localTunnel && data.localTunnel.port)
   if (!port) return acc
   return Object.assign({}, acc, { tunnels: (acc.tunnels || []).filter(function (x) { return x.localPort == null || Number(x.localPort) === port }) })
@@ -1229,11 +1230,11 @@ function deviceLinkState(data, peer, lanMap) {
   var publicVisible = show.public && hasPublic
   var sakuraRaw = sakuraAccountOf(data)
   var sakuraAcc = sakuraRaw ? Object.assign({}, sakuraRaw, { tunnels: (sakuraRaw.tunnels || []).filter(tunnelMatchesNode(localTunnel.port)) }) : null
-  var sakuraVisible = show.sakura && Boolean(sakuraAcc && (sakuraAcc.tunnels || []).length)
+  var sakuraVisible = show.sakura && Boolean(sakuraAcc && ((sakuraAcc.tunnels || []).length || sakuraAcc.error))
   var aliyunPorts = peers.map(function (p) { return isLanPeer(p) ? null : (p.tunnel || {}).port }).filter(Boolean)
   var infra = [
     { key: 'server-aliyun', transport: 'public', name: '公网中转', host: localPub ? maskHost(localPub.host) : '未配置', color: TRANSPORTS.public.color, detail: '隧道 ' + (aliyunPorts.length ? aliyunPorts.sort().join('/') : '—'), up: Boolean(localPub) || hasPublic },
-    { key: 'server-sakura', transport: 'sakura', name: '第三方 frps 穿透', host: sakuraAcc && sakuraAcc.tunnels && sakuraAcc.tunnels[0] ? maskText(sakuraAcc.tunnels[0].addr || '') : '未配置', color: TRANSPORTS.sakura.color, detail: sakuraAcc ? (sakuraAcc.online + '/' + sakuraAcc.total + ' 在线') : '未采集', up: Boolean(sakuraAcc) },
+    { key: 'server-sakura', transport: 'sakura', name: '第三方 frps 穿透', host: sakuraAcc && sakuraAcc.tunnels && sakuraAcc.tunnels[0] ? maskText(sakuraAcc.tunnels[0].addr || '') : (sakuraAcc && sakuraAcc.error ? '状态不可用' : '未配置'), color: TRANSPORTS.sakura.color, detail: sakuraAcc ? (sakuraAcc.available === false ? ('Sakura 限流/未就绪：' + (sakuraAcc.error || 'unknown')) : (sakuraAcc.online + '/' + sakuraAcc.total + ' 在线')) : '未采集', up: Boolean(sakuraAcc && Number(sakuraAcc.online || 0) > 0) },
   ]
   // 2026-11-09-v8：服务器默认位置贴住扇形最高一排设备（用户要求缩小服务器↔设备的垂直间隔）
   function infraDefaultPos(idx) {

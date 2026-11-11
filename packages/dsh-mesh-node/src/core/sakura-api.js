@@ -1,15 +1,27 @@
 // SakuraFrp 账号级隧道状态（只读）：读本机 Launcher token + 调 api.natfrp.com/v4/tunnels（+ /v4/nodes 解析节点域名）
 // 用途：PC 端即可看到同账号下所有设备（含手机）的樱花隧道在线状态，不依赖对端上报。
 // 安全：token 只在内存中使用，绝不写日志/输出；结果缓存 60s。
-import { readFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
+import { dirname, join } from 'node:path'
 import { homedir } from 'node:os'
 
 const API_BASE = 'https://api.natfrp.com'
 // 2026-11-09：动态检测——默认 5s 重新拉取账号隧道状态（SAKURA_POLL_MS 可覆盖；<=3s 会被抬到 3s）
 const CACHE_TTL_MS = Math.max(3000, Number(process.env.SAKURA_POLL_MS || 5000))
 
-let cache = { at: 0, data: null }
+const CACHE_FILE = join(homedir(), '.dsh-mesh', 'sakura-cache.json')
+let cache = { at: 0, data: null, ttl: 0 }
+let lastGood = null
+function saveCache() {
+  try {
+    mkdirSync(dirname(CACHE_FILE), { recursive: true })
+    writeFileSync(CACHE_FILE, JSON.stringify({ at: cache.at, data: cache.data, ttl: cache.ttl, lastGood }), 'utf8')
+  } catch { /* cache is best-effort */ }
+}
+try {
+  const saved = JSON.parse(readFileSync(CACHE_FILE, 'utf8'))
+  if (saved && saved.data) { cache = { at: Number(saved.at) || 0, data: saved.data, ttl: Number(saved.ttl) || 0 }; lastGood = saved.lastGood || null }
+} catch { /* no cache yet */ }
 
 /** 本机 Launcher 配置里的账号 token（Windows / Linux / macOS 常见路径，或 SAKURA_TOKEN 环境变量）。 */
 function findToken() {
@@ -55,11 +67,12 @@ function deviceKeyOf(name) {
  * @param {{ttlMs?:number, token?:string}} [opts]
  */
 export async function collectSakuraAccount({ ttlMs = CACHE_TTL_MS, token } = {}) {
-  if (!token && cache.data && Date.now() - cache.at < ttlMs) return cache.data
+  if (!token && cache.data && Date.now() - cache.at < (cache.ttl || ttlMs)) return cache.data
   const found = token ? { token, source: 'arg' } : findToken()
   if (!found) {
     const data = { available: false, error: '本机未找到 Sakura Launcher token（config.json / SAKURA_TOKEN）', generatedAt: new Date().toISOString() }
-    cache = { at: Date.now(), data }
+    cache = { at: Date.now(), data, ttl: ttlMs }
+  saveCache()
     return data
   }
   try {
@@ -93,11 +106,24 @@ export async function collectSakuraAccount({ ttlMs = CACHE_TTL_MS, token } = {})
       tunnels: list,
       error: null
     }
-    cache = { at: Date.now(), data }
+    lastGood = data
+    cache = { at: Date.now(), data, ttl: ttlMs }
+  saveCache()
     return data
   } catch (error) {
-    const data = { available: false, error: String(error?.message || error), generatedAt: new Date().toISOString(), source: found.source }
-    cache = { at: Date.now(), data }
+    const data = {
+      available: false,
+      error: String(error?.message || error),
+      generatedAt: new Date().toISOString(),
+      source: found.source,
+      stale: true,
+      tunnels: lastGood?.tunnels || [],
+      total: lastGood?.total || (lastGood?.tunnels || []).length,
+      online: lastGood?.online || 0
+    }
+    // 429/限流时不要每 60s 再打 API；保留上一次成功列表，5 分钟后再试
+    cache = { at: Date.now(), data, ttl: Math.max(ttlMs, 300_000) }
+  saveCache()
     return data
   }
 }
