@@ -2102,18 +2102,28 @@ function deviceLinkState(data, peer, lanMap) {
       function discoverCandidates(group) {
         var mesh = (group && group.mesh) || []
         if (!mesh.length) { setSakuraCandidates([]); if (props.onChanged) props.onChanged(); return }
+        var seed = mesh.filter(function (t) { return !isTunnelVerified(t) }).map(function (t) {
+          var addr = tunnelAddr(t)
+          return { key: addr, addr: addr, host: t.host, port: t.remotePort || t.port, name: t.note || t.name || addr, note: t.note || '', version: '', tunnel: t.name || '', probed: false }
+        })
+        setSakuraCandidates(seed)
+        if (props.onChanged) props.onChanged()
         setBusy(true); setMsg('正在探测隧道另一端的 mesh 节点…')
         Promise.all(mesh.map(function (t) {
           return jsonFetch('/api/dsh-mesh/public/probe', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ host: t.host, port: t.remotePort || t.port, sakura: true }) })
             .then(function (j) {
               if (!j || !j.compatible || !j.protocol || j.protocol.service !== 'dsh-mesh') return null
-              var addr = t.host + ':' + (t.remotePort || t.port)
-              return { key: addr, addr: addr, host: t.host, port: t.remotePort || t.port, name: j.protocol.node || t.name || t.note || addr, note: t.note || '', version: j.protocol.version || '', tunnel: t.name || '' }
+              var addr = tunnelAddr(t)
+              return { key: addr, addr: addr, host: t.host, port: t.remotePort || t.port, name: j.protocol.node || t.note || t.name || addr, note: t.note || '', version: j.protocol.version || '', tunnel: t.name || '', probed: true }
             }).catch(function () { return null })
         })).then(function (rows) {
-          var list = rows.filter(Boolean)
+          var byKey = {}
+          seed.forEach(function (c) { byKey[c.key] = c })
+          rows.filter(Boolean).forEach(function (c) { byKey[c.key] = c })
+          var list = Object.keys(byKey).map(function (k) { return byKey[k] })
           setSakuraCandidates(list)
-          setMsg(list.length ? ('发现 ' + list.length + ' 个 mesh 候选节点，待验证') : '隧道可探测，但没有发现 dsh-mesh 节点')
+          var pending = list.filter(function (c) { return !c.probed }).length
+          setMsg(list.length ? ('已加入 ' + list.length + ' 个候选节点' + (pending ? '，' + pending + ' 个待探测' : '，待验证')) : '没有未验证的 mesh 候选节点')
           if (props.onChanged) props.onChanged()
         }).finally(function () { setBusy(false) })
       }
