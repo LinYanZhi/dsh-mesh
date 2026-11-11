@@ -1797,6 +1797,94 @@ function deviceLinkState(data, peer, lanMap) {
       )
     }
 
+    // 2026-11-11：公网服务器检测（输入 IP/域名，可选樱花隧道匹配，验证 dsh-mesh /health 协议）
+    function PublicProbe(props) {
+      var saved = {}
+      try { saved = JSON.parse(window.localStorage.getItem('dsh-mesh-ui.publicProbe.v1') || '{}') || {} } catch (_) { saved = {} }
+      var hs = useState(saved.host || ''); var host = hs[0]; var setHost = hs[1]
+      var ps = useState(saved.port || 8124); var port = ps[0]; var setPort = ps[1]
+      var ss = useState(saved.sakura === true); var sakura = ss[0]; var setSakura = ss[1]
+      var rs = useState(null); var result = rs[0]; var setResult = rs[1]
+      var bs = useState(false); var busy = bs[0]; var setBusy = bs[1]
+      var ms = useState(''); var msg = ms[0]; var setMsg = ms[1]
+
+      var tunnels = (props.data && props.data.tunnels) || {}
+      var endpoints = []
+      function addEndpoint(kind, name, h, p, up) {
+        h = String(h || ''); p = String(p || '')
+        if (!h || !p) return
+        if (endpoints.some(function (x) { return x.host === h && x.port === p })) return
+        endpoints.push({ kind: kind, name: name || kind, host: h, port: p, up: up === true })
+      }
+      if (tunnels.selfHosted) addEndpoint('自建', tunnels.selfHosted.name || '自建 frps', tunnels.selfHosted.host, tunnels.selfHosted.port, tunnels.selfHosted.probe && tunnels.selfHosted.probe.up)
+      ;(tunnels.sakura && tunnels.sakura.tunnels || []).forEach(function (t) { addEndpoint('樱花', t.name || '樱花隧道', t.host, t.port, t.probe && t.probe.up) })
+      ;(tunnels.sakuraAccount && tunnels.sakuraAccount.tunnels || []).forEach(function (t) {
+        if (t.host && t.port) addEndpoint('樱花', t.name || '樱花隧道', t.host, t.port, t.online === true)
+        else if (t.addr) { var m = /^([^:]+):(\d+)$/.exec(String(t.addr)); if (m) addEndpoint('樱花', t.name || '樱花隧道', m[1], m[2], t.online === true) }
+      })
+
+      function remember(nextHost, nextPort, nextSakura) {
+        try { window.localStorage.setItem('dsh-mesh-ui.publicProbe.v1', JSON.stringify({ host: nextHost, port: nextPort, sakura: nextSakura })) } catch (_) {}
+      }
+      function probe() {
+        var h = String(host || '').trim()
+        var p = Number(port)
+        if (!h) { setMsg('请输入公网 IP 或域名'); return }
+        if (!Number.isInteger(p) || p < 1 || p > 65535) { setMsg('端口必须是 1-65535'); return }
+        remember(h, p, sakura)
+        setBusy(true); setMsg(''); setResult(null)
+        jsonFetch('/api/dsh-mesh/public/probe', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ host: h, port: p, sakura: sakura }) })
+          .then(function (j) { setResult(j); if (!j.ok && j.error) setMsg(String(j.error)) })
+          .catch(function (e) { setMsg(String(e.message || e)) })
+          .finally(function () { setBusy(false) })
+      }
+      function row(k, v, tone) {
+        if (v == null || v === '') return null
+        return h('div', { className: 'dm-public-row' },
+          h('span', { className: 'dm-public-k' }, k),
+          h('span', { className: 'dm-public-v ' + (tone || '') }, String(v))
+        )
+      }
+      var proto = result && result.protocol
+      var sak = result && result.sakura
+      return h('div', { className: 'dm-public' },
+        h('div', { className: 'dm-sub' }, '输入公网服务器 IP/域名，检测 TCP、TLS 和 dsh-mesh 协议；勾选后会同时匹配本机樱花/自建隧道入口。'),
+        h('div', { className: 'dm-public-form' },
+          h('input', { type: 'text', value: host, placeholder: '公网 IP 或域名', spellCheck: false, onChange: function (e) { setHost(e.target.value) } }),
+          h('input', { type: 'number', min: 1, max: 65535, value: port, placeholder: '端口', onChange: function (e) { setPort(e.target.value) } }),
+          h('label', { className: 'dm-public-check' },
+            h('input', { type: 'checkbox', checked: sakura, onChange: function (e) { setSakura(e.target.checked) } }),
+            h('span', null, '检测樱花穿透隧道')
+          ),
+          h('button', { className: 'dm-btn primary', disabled: busy, onClick: probe }, busy ? '检测中…' : '检测')
+        ),
+        endpoints.length ? h('div', { className: 'dm-public-suggest' },
+          h('span', { className: 'dm-sub' }, '本机入口：'),
+          endpoints.map(function (it, i) {
+            return h('button', { className: 'dm-btn', key: i, title: it.host + ':' + it.port, onClick: function () { setHost(it.host); setPort(it.port) } },
+              (it.kind === '樱花' ? '樱花 · ' : '') + it.name + ' :' + it.port)
+          })
+        ) : null,
+        msg ? h('div', { className: 'dm-sub dm-public-msg' }, msg) : null,
+        result ? h('div', { className: 'dm-public-res' },
+          h('div', { className: 'dm-public-summary' },
+            h('span', { className: 'dm-chip ' + (result.compatible ? 'ok' : 'bad') }, result.compatible ? '协议兼容' : '协议不匹配'),
+            h('span', { className: 'dm-sub dm-mono' }, result.host + ':' + result.port)
+          ),
+          row('TCP', result.tcp && result.tcp.ok ? '可达 · ' + (result.tcp.latencyMs || 0) + 'ms' : (result.tcp && result.tcp.error || '不可达'), result.tcp && result.tcp.ok ? 'good' : 'bad'),
+          row('TLS', result.tls && result.tls.ok ? '证书可读 · ' + (result.tls.fingerprint256 ? result.tls.fingerprint256.slice(0, 23) + '…' : '') : '未建立 TLS', result.tls && result.tls.ok ? 'good' : 'muted'),
+          row('协议', proto && proto.ok ? ('dsh-mesh · v' + (proto.version || '?') + ' · ' + (proto.node || '?')) : (proto && proto.error || '未验证'), proto && proto.ok ? 'good' : 'bad'),
+          proto && proto.ok ? row('通道', (proto.channel || '') + (proto.tls ? ' · TLS' : '') + (proto.pairing && proto.pairing.enabled ? ' · 允许配对' : '')) : null,
+          sak ? h('div', { className: 'dm-public-sakura' },
+            h('div', { className: 'dm-sub' }, sak.available ? ('樱花账号：' + sak.online + '/' + sak.total + ' 在线') : ('樱花账号不可用：' + (sak.error || '未知'))),
+            sak.matches && sak.matches.length ? sak.matches.map(function (m, i) {
+              return h('div', { className: 'dm-public-row', key: i }, h('span', { className: 'dm-public-k' }, '匹配'), h('span', { className: 'dm-public-v good' }, m.name + ' · ' + m.host + ':' + m.port + (m.up ? ' · 在线' : ' · 离线')))
+            }) : h('div', { className: 'dm-sub' }, '没有匹配到本机樱花隧道入口；仍可按 IP/端口直连检测。')
+          ) : null
+        ) : null
+      )
+    }
+
     // 2026-11-11：AI 网络使用说明 / 可复制提示词
     function UsageHelp(props) {
       return h('div', { className: 'dm-usage' },
@@ -2128,6 +2216,7 @@ function deviceLinkState(data, peer, lanMap) {
           h('div', { className: 'dm-pane' },
             h(Details, { title: '使用说明', badge: 'AI 能做什么', open: true }, h(UsageHelp, { onOpen: function () { setHelpOpen(true) } })),
             h(Details, { title: '局域网连接', badge: '扫描 / 配对' }, h(LanOnboarding, { onChanged: function () { load(true) } })),
+        h(Details, { title: '公网服务器', badge: 'IP / 樱花检测' }, h(PublicProbe, { data: data })),
             h(Details, { title: '节点管理', badge: '移除 / 吊销' }, h(NodeManager, { onChanged: function () { load(true) } })),
             h(Details, { title: '文件传输', badge: '历史' }, h(TransferHistory)),
             h(Details, { title: '本机实例', badge: ((data.local && data.local.instances) || []).length, open: true }, h(InstanceList, { data: data })),
@@ -2849,6 +2938,24 @@ body[data-ds-dark-theme] .dm-dg-fs-item.active { background:rgba(88,166,255,.28)
 @media (max-width: 1000px) { .dm-width-handle { display:none; } }
 .dm-body { display:grid; grid-template-columns:minmax(300px, var(--dm-main-w, 62%)) 8px minmax(0,1fr); gap:10px; align-items:start; }
 .dm-lan { border:1px solid rgba(128,128,128,.25); border-radius:12px; padding:10px 12px; background:rgba(128,128,128,.035); }
+.dm-public-form { display:flex; gap:6px; align-items:center; flex-wrap:wrap; margin-top:8px; }
+.dm-public-form input[type=text], .dm-public-form input[type=number] { min-width:0; padding:5px 8px; border-radius:7px; border:1px solid rgba(128,128,128,.35); background:rgba(128,128,128,.08); color:inherit; font-size:12px; outline:none; }
+.dm-public-form input[type=text] { width:170px; }
+.dm-public-form input[type=number] { width:76px; }
+.dm-public-form input:focus { border-color:#4d9bff; }
+.dm-public-check { display:flex; gap:4px; align-items:center; font-size:11.5px; opacity:.85; cursor:pointer; }
+.dm-public-suggest { display:flex; gap:5px; align-items:center; flex-wrap:wrap; margin-top:6px; }
+.dm-public-suggest .dm-btn { font-size:11px; padding:3px 7px; }
+.dm-public-res { margin-top:9px; padding-top:8px; border-top:1px dashed rgba(128,128,128,.28); }
+.dm-public-summary { display:flex; gap:7px; align-items:center; margin-bottom:3px; }
+.dm-public-row { display:flex; gap:6px; align-items:baseline; margin-top:3px; font-size:11.5px; line-height:1.35; }
+.dm-public-k { width:34px; flex:0 0 auto; opacity:.55; }
+.dm-public-v { min-width:0; word-break:break-all; }
+.dm-public-v.good { color:#2e9e4f; }
+.dm-public-v.bad { color:#c9362c; }
+.dm-public-v.muted { opacity:.6; }
+.dm-public-msg { margin-top:6px; color:#c9362c; }
+.dm-public-sakura { margin-top:7px; padding-top:6px; border-top:1px dashed rgba(128,128,128,.2); }
 .dm-lan-row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-top:8px; }
 .dm-lan input { font:inherit; font-size:12px; padding:5px 8px; border:1px solid rgba(128,128,128,.35); border-radius:7px; background:transparent; color:inherit; min-width:180px; }
 .dm-lan-node { display:flex; gap:8px; align-items:center; border-top:1px solid rgba(128,128,128,.16); padding:7px 0; font-size:12px; }

@@ -13,6 +13,7 @@
 
 import { collect, resolveRepo, meshHome, run, nodeExec } from './collect.js'
 import { listDelegations, sessionHistory, taskStatus } from './delegations.js'
+import { probePublicTarget } from './public-probe.js'
 import { networkInterfaces } from 'node:os'
 import net from 'node:net'
 import tls from 'node:tls'
@@ -256,6 +257,26 @@ export function apply(ctx) {
     }
   }
 
+  const publicProbeRoute = {
+    kind: 'exact',
+    path: '/api/dsh-mesh/public/probe',
+    handler: async (req, res) => {
+      if (!isLoopback(req)) return writeJson(res, 403, { ok: false, error: 'forbidden: loopback-only' })
+      if ((req.method || 'GET').toUpperCase() !== 'POST') return writeJson(res, 405, { ok: false, error: 'method not allowed' })
+      const body = await readBody(req)
+      if (!body || typeof body.host !== 'string') return writeJson(res, 400, { ok: false, error: 'host required' })
+      try {
+        const result = await probePublicTarget(body.host, body.port || 8124, {
+          sakura: body.sakura === true,
+          tunnels: state.snapshot?.tunnels || {}
+        })
+        writeJson(res, 200, result)
+      } catch (error) {
+        writeJson(res, 500, { ok: false, error: String(error?.message || error) })
+      }
+    }
+  }
+
   const lanPairRoute = {
     kind: 'exact',
     path: '/api/dsh-mesh/lan/pair',
@@ -407,7 +428,7 @@ export function apply(ctx) {
 
   ctx.effect(() => {
     const disposeRoute = ctx.webServer.register(route)
-    const disposeLanRoutes = [lanScanRoute, lanCodeRoute, lanCheckRoute, lanPairRoute, federatedRoute, peersListRoute, peersRemoveRoute, peersToggleRoute, tokensListRoute, tokensRevokeRoute, transfersRoute].map((item) => ctx.webServer.register(item))
+    const disposeLanRoutes = [lanScanRoute, lanCodeRoute, lanCheckRoute, lanPairRoute, publicProbeRoute, federatedRoute, peersListRoute, peersRemoveRoute, peersToggleRoute, tokensListRoute, tokensRevokeRoute, transfersRoute].map((item) => ctx.webServer.register(item))
     const disposeRoutes = delegateRoutes.map((item) => ctx.webServer.register(item))
     return () => {
       try {
