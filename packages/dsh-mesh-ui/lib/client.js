@@ -1580,11 +1580,17 @@ function deviceLinkState(data, peer, lanMap) {
       fed.y = fed.gy + 150 + row * 92
     })
   })
+  function fedPosition(fed) {
+    var key = 'fed:' + fed.item.via + ':' + fed.item.name
+    var moved = props.movedLayout && props.movedLayout[key]
+    return { key: key, x: moved && moved.length === 2 ? Number(moved[0]) : fed.x, y: moved && moved.length === 2 ? Number(moved[1]) : fed.y }
+  }
   var maxFedX = layout.W, maxFedY = layout.H
-  fedItems.forEach(function (fed) { maxFedX = Math.max(maxFedX, fed.x + 120); maxFedY = Math.max(maxFedY, fed.y + 80) })
+  fedItems.forEach(function (fed) { var fp = fedPosition(fed); maxFedX = Math.max(maxFedX, fp.x + 120); maxFedY = Math.max(maxFedY, fp.y + 80) })
   layout.W = Math.ceil(maxFedX); layout.H = Math.ceil(maxFedY)
   fedItems.forEach(function (fed) {
-    svgEls.push(h('line', { key: 'fed-edge-' + fed.item.name + '-' + fed.item.via, x1: fed.gx, y1: fed.gy, x2: fed.x, y2: fed.y, className: 'dm-edge-indirect', strokeDasharray: '4 4' }))
+    var fp = fedPosition(fed)
+    svgEls.push(h('line', { key: 'fed-edge-' + fed.item.name + '-' + fed.item.via, x1: fed.gx, y1: fed.gy, x2: fp.x, y2: fp.y, className: 'dm-edge-indirect', strokeDasharray: '4 4' }))
   })
   return h('div', null,
     h('svg', { className: 'dm-lines', width: layout.W, height: layout.H, viewBox: '0 0 ' + layout.W + ' ' + layout.H }, svgEls),
@@ -1622,9 +1628,9 @@ function deviceLinkState(data, peer, lanMap) {
     fedItems.map(function (fed) {
       var item = fed.item
       var fedKey = 'fed:' + item.via + ':' + item.name
-      var moved = props.movedLayout && props.movedLayout[fedKey]
-      var fx = moved && moved.length === 2 ? Number(moved[0]) : fed.x
-      var fy = moved && moved.length === 2 ? Number(moved[1]) : fed.y
+      var fp = fedPosition(fed)
+      var fx = fp.x
+      var fy = fp.y
       return h('div', {
         key: fedKey,
         className: 'dm-card-node indirect draggable' + (props.selectedKey === fedKey ? ' selected' : '') + (hoverKey === fedKey ? ' hovered' : '') + (dragKey === fedKey ? ' dragging' : ''),
