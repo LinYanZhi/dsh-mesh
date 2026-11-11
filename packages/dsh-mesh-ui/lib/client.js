@@ -1545,6 +1545,8 @@ function deviceLinkState(data, peer, lanMap) {
       return
     }
     var sizeN = sizeOf(n.key)
+    // Sakura 服务器未加入拓扑时，peer 仍然通过 Sakura 隧道连到本机；不画这条边会让 peer 子树变成独立树
+    if (!sakuraVisible && n.sakuraTunnel) svgEls = svgEls.concat(curve('sak-direct' + i, layout.positions[localNodeIdx], pa, n.sakuraUp === true, TRANSPORTS.sakura, maskText(n.sakuraTunnel.addr || ''), sizeOf('local'), sizeN, edgeRelated('local', n.key)))
     if (publicVisible && !n.sakuraTunnel && n.tunnel && n.tunnel.host && !isLanPeer(n) && (n.tunnel.kind === 'frp' || n.tunnel.kind === 'wan')) svgEls = svgEls.concat(curve('pub' + i, pa, aliyunPos, n.publicUp, TRANSPORTS.public, maskHost(n.tunnel.host) + ((n.tunnel.port) ? ':' + n.tunnel.port : ''), sizeN, aliyunSize, edgeRelated(n.key, 'server-aliyun')))
     if (sakuraVisible && n.sakuraTunnel) svgEls = svgEls.concat(curve('sak' + i, pa, sakuraPos, n.sakuraUp === true, TRANSPORTS.sakura, maskText(n.sakuraTunnel.addr || ''), sizeN, sakuraSize, edgeRelated(n.key, 'server-sakura')))
     if (sakuraVisible && n.candidate) svgEls = svgEls.concat(curve('cand' + i, pa, sakuraPos, false, TRANSPORTS.sakura, maskText(n.tunnel.addr || ''), sizeN, sakuraSize, edgeRelated(n.key, 'server-sakura')))
