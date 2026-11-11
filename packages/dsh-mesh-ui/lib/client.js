@@ -1006,11 +1006,35 @@ function tunnelMatchesNode(port) {
 }
 function sakuraAccountOf(data) {
   var acc = data && data.tunnels && data.tunnels.sakuraAccount
-  if (!acc) return null
-  if (acc.available !== true && !(acc.tunnels || []).length && !acc.error) return null
+  var local = (data && data.tunnels && data.tunnels.sakura && data.tunnels.sakura.tunnels) || []
+  if (!acc && !local.length) return null
+  var localMapped = local.map(function (t) {
+    return {
+      id: t.name + ':' + t.host + ':' + t.port,
+      name: t.name,
+      host: t.host,
+      remotePort: t.port,
+      localPort: t.localPort == null ? null : Number(t.localPort),
+      online: t.probe ? t.probe.up === true : t.online === true,
+      deviceKey: peerDeviceKey(t.name),
+      addr: (t.host || '') + ':' + (t.port || '')
+    }
+  })
+  var list = (acc && acc.tunnels && acc.tunnels.length) ? acc.tunnels : localMapped
+  if (!acc && !list.length) return null
+  var base = acc ? Object.assign({}, acc) : { available: false, error: '账号 API 暂不可用', total: list.length, online: list.filter(function (x) { return x.online }).length, tunnels: list }
+  if (localMapped.length && (!acc || acc.available !== true || !(acc.tunnels || []).length)) {
+    base.available = true
+    base.source = 'local-log'
+    base.error = null
+    base.total = list.length
+    base.online = list.filter(function (x) { return x.online }).length
+    base.tunnels = list
+  }
   var port = Number(data && data.localTunnel && data.localTunnel.port)
-  if (!port) return acc
-  return Object.assign({}, acc, { tunnels: (acc.tunnels || []).filter(function (x) { return x.localPort == null || Number(x.localPort) === port }) })
+  var filtered = list
+  if (port) filtered = list.filter(function (x) { return x.localPort == null || Number(x.localPort) === port })
+  return Object.assign({}, base, { tunnels: filtered, total: filtered.length, online: filtered.filter(function (x) { return x.online }).length })
 }
 function sakuraTunnelOf(data, devKey) {
   var acc = sakuraAccountOf(data)

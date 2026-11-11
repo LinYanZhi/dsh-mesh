@@ -1,6 +1,6 @@
 // dsh-mesh 隧道采集（只读）：自建 frps（.runtime/frpc/frpc.toml）+ Sakura Launcher 日志/进程 + 端口探测
 // 用途：/health 上报给其它节点、mesh-health 聚合、面板显示、可独立 CLI 调用
-import { existsSync, readFileSync, readdirSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import net from 'node:net'
 import { execFileSync } from 'node:child_process'
@@ -36,13 +36,14 @@ function sakuraTunnels() {
   try {
     if (!existsSync(dir)) return []
     const files = readdirSync(dir)
-      .filter((n) => n.endsWith('.log'))
-      .sort()
+      .filter((n) => n.endsWith('.log') && /sakura/i.test(n))
+      .map((n) => ({ n, at: (() => { try { return statSync(join(dir, n)).mtimeMs } catch { return 0 } })() }))
+      .sort((a, b) => b.at - a.at)
     if (!files.length) return []
-    const text = readText(join(dir, files[files.length - 1]))
+    const text = readText(join(dir, files[0].n))
     const tail = text.slice(-400000)
     const found = new Map()
-    const re = /frpc\[([^\]|]+)[^\]]*\][^\n]*?使用 >>([^\s:]+):(\d+)<</g
+    const re = /frpc\[([^\]|]+)[^\]]*\][^\n]*?>>([^\s:]+):(\d+)<</g
     let m
     while ((m = re.exec(tail))) found.set(m[1].trim(), { name: m[1].trim(), host: m[2], port: m[3] })
     return [...found.values()]
