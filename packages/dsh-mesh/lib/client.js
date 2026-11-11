@@ -1866,7 +1866,7 @@ function deviceLinkState(data, peer, lanMap) {
           })
         ) : null,
         msg ? h('div', { className: 'dm-sub dm-public-msg' }, msg) : null,
-        result ? h('div', { className: 'dm-public-res' },
+        result && result.host ? h('div', { className: 'dm-public-res' },
           h('div', { className: 'dm-public-summary' },
             h('span', { className: 'dm-chip ' + (result.compatible ? 'ok' : 'bad') }, result.compatible ? '协议兼容' : '协议不匹配'),
             h('span', { className: 'dm-sub dm-mono' }, result.host + ':' + result.port)
@@ -1919,8 +1919,17 @@ function deviceLinkState(data, peer, lanMap) {
         if (!Number.isInteger(p) || p < 1 || p > 65535) { setMsg('端口必须是 1-65535'); return }
         setBusy(true); setMsg(''); setResult(null)
         jsonFetch('/api/dsh-mesh/public/probe', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ host: h, port: p, sakura: nextSakura === true }) })
-          .then(function (j) { setResult(j); if (!j.ok && j.error) setMsg(String(j.error)) })
-          .catch(function (e) { setMsg(String(e.message || e)) })
+          .then(function (j) {
+            // 校验/网络错误没有 host/port/tcp 结果，不能当成检测结果渲染
+            if (!j || !j.host || !j.port) {
+              setResult(null)
+              setMsg(String((j && j.error) || '检测失败'))
+              return
+            }
+            setResult(j)
+            if (!j.ok && j.error) setMsg(String(j.error))
+          })
+          .catch(function (e) { setResult(null); setMsg(String(e.message || e)) })
           .finally(function () { setBusy(false) })
       }
       function switchMode(next) {
@@ -1973,7 +1982,7 @@ function deviceLinkState(data, peer, lanMap) {
             )
           ),
         msg ? h('div', { className: 'dm-sub dm-public-msg' }, msg) : null,
-        result ? h('div', { className: 'dm-public-res' },
+        result && result.host ? h('div', { className: 'dm-public-res' },
           h('div', { className: 'dm-public-summary' },
             h('span', { className: 'dm-chip ' + (result.compatible ? 'ok' : 'bad') }, result.compatible ? '协议兼容' : '协议不匹配'),
             h('span', { className: 'dm-sub dm-mono' }, result.host + ':' + result.port)
