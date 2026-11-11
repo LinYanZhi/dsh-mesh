@@ -96,6 +96,19 @@ function nodeLabel(name) { return NODE_LABELS[String(name || '').toLowerCase()] 
     }
     // 2026-11-10：设备显示顺序（左→右 / 逆时针）——拓扑渲染与拖拽位置表必须共用同一顺序
     var FAN_ORDER = []
+    function keyServerAffinity(key, data) {
+      if (key === 'local') return 0.5
+      if (String(key).indexOf('candidate:') === 0) return 1
+      var d = data || {}
+      var peers = filterSelfPeers(dedupePeers(d.peers || []), d.nodeName)
+      var name = String(key || '').replace(/^peer:/, '')
+      var found = peers.filter(function (p) { return String(p.name) === name })[0]
+      if (!found) return 0.5
+      if (sakuraTunnelOf(d, peerDeviceKey(found.name), found)) return 1
+      var t = found.tunnel || {}
+      if (t.kind === 'frp' || t.kind === 'wan') return 0
+      return 0.5
+    }
     function fanRankOfNodeKey(key, data) {
       var dev = key === 'local' ? peerDeviceKey(data && data.nodeName) : peerDeviceKey(String(key || '').replace(/^peer:/, ''))
       var idx = FAN_ORDER.indexOf(dev)
@@ -104,6 +117,8 @@ function nodeLabel(name) { return NODE_LABELS[String(name || '').toLowerCase()] 
     function orderedNodeKeys(data) {
       var keys = topologyNodeKeys(data).slice()
       keys.sort(function (a, b) {
+        var s = keyServerAffinity(a, data) - keyServerAffinity(b, data)
+        if (s !== 0) return s
         var d = fanRankOfNodeKey(a, data) - fanRankOfNodeKey(b, data)
         return d !== 0 ? d : String(a).localeCompare(String(b))
       })
@@ -1383,22 +1398,7 @@ function deviceLinkState(data, peer, lanMap) {
   }))
   // 默认布局的交叉削减：按邻接服务器做 barycenter 排序，左侧公网 / 右侧 Sakura，本机放中间
   var orderKeys = orderedNodeKeys(data)
-  function nodeServerAffinity(node) {
-    if (node.candidate) return 1
-    if (node.sakuraTunnel) return 1
-    var t = node.tunnel || {}
-    if (t.kind === 'frp' || t.kind === 'wan') return 0
-    return 0.5
-  }
-  var localNodes = nodes.filter(function (n) { return n.local })
-  var restNodes = nodes.filter(function (n) { return !n.local })
-  restNodes.sort(function (a, b) {
-    var d = nodeServerAffinity(a) - nodeServerAffinity(b)
-    if (d !== 0) return d
-    return orderKeys.indexOf(a.key) - orderKeys.indexOf(b.key)
-  })
-  var mid = Math.floor(restNodes.length / 2)
-  nodes = restNodes.slice(0, mid).concat(localNodes, restNodes.slice(mid))
+  nodes.sort(function (a, b) { return orderKeys.indexOf(a.key) - orderKeys.indexOf(b.key) })
   // 基础设施节点（中转服务器）：阿里云 / 樱花
   var localPub = publicEntryFor(localTunnel)
   var selectedPublic = selectedPublicServer()
