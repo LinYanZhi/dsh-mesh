@@ -1,0 +1,8 @@
+# dsh-mesh: install host bridge + autostart + sidebar UI in one step
+- insert:
+    - id: dsh-mesh-host
+      name: dsh-mesh-host
+    - id: dsh-mesh-autostart
+      name: dsh-mesh-autostart
+    - id: dsh-mesh-ui
+      name: dsh-mesh-ui

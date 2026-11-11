@@ -1,0 +1,42 @@
+{
+  "name": "dsh-mesh",
+  "version": "0.1.0",
+  "description": "One-command install for dsh-mesh: AI network node, DSH host bridge, sidebar UI and autostart supervisor in a single DSH plugin bundle.",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./package.json": "./package.json"
+  },
+  "engines": {
+    "node": "^22.19.0 || >=24.0.0",
+    "dsh": ">=0.2.0-rc.2 <0.3.0"
+  },
+  "dsh": {
+    "manifestVersion": 1,
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "dependencies": {
+    "dsh-mesh-node": "0.0.20",
+    "dsh-mesh-host": "0.0.5",
+    "dsh-mesh-ui": "0.0.45",
+    "dsh-mesh-autostart": "0.0.7"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/dsh": ">=0.2.0-rc.2 <0.3.0"
+  },
+  "files": [
+    "lib",
+    "cordis.patch.yml",
+    "README.md",
+    "LICENSE"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/LinYanZhi/dsh-mesh.git"
+  },
+  "homepage": "https://github.com/LinYanZhi/dsh-mesh#readme"
+}
