@@ -1847,6 +1847,23 @@ function deviceLinkState(data, peer, lanMap) {
       }
       var proto = result && result.protocol
       var sak = result && result.sakura
+      // 公网直连：列出当前已有的公网入口（本机 + 已配对 peer），而不是只让用户盲填
+      var directEndpoints = []
+      function addDirect(source, h, p, up, kind) {
+        h = String(h || ''); p = String(p || '')
+        if (!h || !p) return
+        if (directEndpoints.some(function (x) { return x.host === h && x.port === p })) return
+        directEndpoints.push({ source: source || '入口', host: h, port: p, up: up === true, kind: kind || '' })
+      }
+      var lt = (props.data && props.data.localTunnel) || {}
+      if (lt.host && lt.port) addDirect('本机', lt.host, lt.port, Boolean(lt.probe && lt.probe.up) || Boolean(lt.host), lt.kind || '')
+      ;((props.data && props.data.peers) || []).forEach(function (p) {
+        if (isLanPeer(p)) return
+        var t = p.tunnel || {}
+        if (!t.host || !t.port) return
+        if (t.kind !== 'frp' && t.kind !== 'wan') return
+        addDirect(nodeDisplay(peerDeviceKey(p.name)), t.host, t.port, Boolean(p.up || (t.probe && t.probe.up)), t.kind)
+      })
       return h('div', { className: 'dm-public' },
         h('div', { className: 'dm-sub' }, '输入公网服务器 IP/域名，检测 TCP、TLS 和 dsh-mesh 协议；勾选后会同时匹配本机樱花/自建隧道入口。'),
         h('div', { className: 'dm-public-form' },
@@ -1947,6 +1964,23 @@ function deviceLinkState(data, peer, lanMap) {
       }
       var proto = result && result.protocol
       var sak = result && result.sakura
+      // 公网直连：列出当前已有的公网入口（本机 + 已配对 peer），而不是只让用户盲填
+      var directEndpoints = []
+      function addDirect(source, h, p, up, kind) {
+        h = String(h || ''); p = String(p || '')
+        if (!h || !p) return
+        if (directEndpoints.some(function (x) { return x.host === h && x.port === p })) return
+        directEndpoints.push({ source: source || '入口', host: h, port: p, up: up === true, kind: kind || '' })
+      }
+      var lt = (props.data && props.data.localTunnel) || {}
+      if (lt.host && lt.port) addDirect('本机', lt.host, lt.port, Boolean(lt.probe && lt.probe.up) || Boolean(lt.host), lt.kind || '')
+      ;((props.data && props.data.peers) || []).forEach(function (p) {
+        if (isLanPeer(p)) return
+        var t = p.tunnel || {}
+        if (!t.host || !t.port) return
+        if (t.kind !== 'frp' && t.kind !== 'wan') return
+        addDirect(nodeDisplay(peerDeviceKey(p.name)), t.host, t.port, Boolean(p.up || (t.probe && t.probe.up)), t.kind)
+      })
       return h('div', { className: 'dm-public' },
         h('div', { className: 'dm-pub-tabs' },
           h('button', { className: 'dm-pub-tab' + (mode === 'direct' ? ' active' : ''), onClick: function () { switchMode('direct') } }, '公网直连'),
@@ -1954,7 +1988,19 @@ function deviceLinkState(data, peer, lanMap) {
         ),
         mode === 'direct'
           ? h('div', null,
-            h('div', { className: 'dm-sub' }, '公网直连需要你提供服务器地址和端口。适合有公网 IP、端口映射或自建 frps 的节点。'),
+            h('div', { className: 'dm-sub' }, '当前已存在的公网入口。可直接检测已有地址，也可以在下面手动输入新的 IP/端口。'),
+            directEndpoints.length ? h('table', { className: 'dm-lan-table' },
+              h('thead', null, h('tr', null, h('th', null, '来源'), h('th', null, '公网地址'), h('th', null, '状态'), h('th', null, '操作'))),
+              h('tbody', null, directEndpoints.map(function (it, i) {
+                return h('tr', { key: i },
+                  h('td', { title: it.source }, it.source),
+                  h('td', { className: 'dm-mono' }, it.host + ':' + it.port),
+                  h('td', null, h('span', { className: 'dm-chip ' + (it.up ? 'ok' : 'muted') }, it.up ? '在线' : '未探测')),
+                  h('td', { className: 'dm-lan-actions' }, h('button', { className: 'dm-btn', disabled: busy, onClick: function () { setHost(it.host); setPort(it.port); persist(mode, it.host, it.port); runProbe(it.host, it.port, false) } }, '检测'))
+                )
+              }))
+            ) : h('div', { className: 'dm-empty' }, '当前没有已配对的公网入口，可在下面手动输入。'),
+            h('div', { className: 'dm-sub', style: { marginTop: 8 } }, '手动输入公网地址：'),
             h('div', { className: 'dm-public-form' },
               h('input', { type: 'text', value: host, placeholder: '公网 IP 或域名', spellCheck: false, onChange: function (e) { setHost(e.target.value) } }),
               h('input', { type: 'number', min: 1, max: 65535, value: port, placeholder: '端口', onChange: function (e) { setPort(e.target.value) } }),
