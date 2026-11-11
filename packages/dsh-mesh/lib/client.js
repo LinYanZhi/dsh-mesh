@@ -276,11 +276,11 @@ body.light .dm-edge-label { stroke: rgba(255,255,255,.92); }
 .dm-card-node.hovered { border-color: rgba(88,166,255,.95) !important; box-shadow: 0 0 0 2px rgba(88,166,255,.35), 0 10px 26px rgba(0,0,0,.25); z-index: 5; }
 .dm-world-outer { position:absolute; left:0; top:0; }
 .dm-world { position:absolute; left:0; top:0; transform-origin:0 0; }
-.dm-lines { position:absolute; left:0; top:0; overflow:visible; pointer-events:none; }
+.dm-lines { position:absolute; left:0; top:0; overflow:visible; pointer-events:none; z-index:0; }
 .dm-world-label { position:absolute; left:10px; top:8px; font-size:11px; opacity:.5; font-variant-numeric:tabular-nums; }
 
 /* 节点卡片（世界坐标里） */
-.dm-card-node { position:absolute; box-sizing:border-box; overflow:visible; border-radius:12px; padding:10px 12px;
+.dm-card-node { position:absolute; z-index:1; box-sizing:border-box; overflow:visible; border-radius:12px; padding:10px 12px;
     border:1px solid rgba(128,128,128,.3); background:rgba(128,128,128,.06); color:inherit; box-shadow:0 6px 22px rgba(0,0,0,.10); }
   .dm-card-node.local { border-width:1.6px; border-color:rgba(88,166,255,.55); background:rgba(88,166,255,.10); }
   .dm-card-node.down { border-style:dashed; border-color:rgba(248,81,73,.6); background:rgba(248,81,73,.07); }
@@ -3684,7 +3684,8 @@ body[data-ds-dark-theme] .dm-dg-fs-item.active { background:rgba(88,166,255,.28)
 .dm-help-prompt-head { display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:3px; }
 .dm-btn.bad { border-color:rgba(209,75,65,.55); color:#d14b41; }
 
-.dm-card-node.indirect { opacity:.62; border-style:dashed; border-color:rgba(128,128,128,.45); background:rgba(128,128,128,.03); }
+.dm-card-node.indirect { z-index:2; border-style:dashed; border-color:rgba(128,128,128,.45); background:rgba(255,255,255,.97); }
+@media (prefers-color-scheme: dark) { .dm-card-node.indirect { background:#1d2025; } }
 .dm-fed-badge { font-size:10px; opacity:.6; padding:1px 5px; border:1px dashed rgba(128,128,128,.5); border-radius:999px; white-space:nowrap; }
 .dm-edge-indirect { stroke:rgba(128,128,128,.5); stroke-width:1.1; fill:none; }
 
