@@ -2040,8 +2040,14 @@ function deviceLinkState(data, peer, lanMap) {
       function load() {
         setBusy(true); setMsg('')
         jsonFetch('/api/dsh-mesh/permissions').then(function (j) {
-          if (j.ok) setTools(j.tools || []); else setMsg(j.error || '读取权限失败')
-        }).catch(function (e) { setMsg(String(e.message || e)) }).finally(function () { setBusy(false) })
+          if (j.ok) setTools(j.tools || [])
+          else {
+            setTools([])
+            setMsg(String(j.error || '读取权限失败') === 'not found'
+              ? '当前 DSH 实例的服务端插件还是旧版，没有权限接口；重启该实例后可用。'
+              : (j.error || '读取权限失败'))
+          }
+        }).catch(function (e) { setTools([]); setMsg(String(e.message || e)) }).finally(function () { setBusy(false) })
       }
       useEffect(function () { load() }, [])
       function toggle(tool) {
@@ -2053,7 +2059,7 @@ function deviceLinkState(data, peer, lanMap) {
             else setMsg(String(j.error || j.stderr || '更新失败').slice(0, 300))
           }).catch(function (e) { setMsg(String(e.message || e)) }).finally(function () { setBusy(false) })
       }
-      var filtered = (tools || []).filter(function (t) { return !query || (t.name + ' ' + t.description).toLowerCase().indexOf(query.toLowerCase()) >= 0 })
+      var filtered = (tools || []).filter(function (t) { return !query || (t.name + ' ' + (t.descriptionZh || '') + ' ' + t.description).toLowerCase().indexOf(query.toLowerCase()) >= 0 })
       return h('div', { className: 'dm-perm' },
         h('div', { className: 'dm-sub' }, '控制对端可以通过 AI 网络调用本机的哪些工具。禁止后对端立即失去权限；这只改本机 ACL，不会同步到其他设备。'),
         h('div', { className: 'dm-lan-row' },
@@ -2067,7 +2073,7 @@ function deviceLinkState(data, peer, lanMap) {
             return h('label', { className: 'dm-perm-row', key: t.name },
               h('input', { type: 'checkbox', checked: t.allowed, disabled: busy, onChange: function () { toggle(t) } }),
               h('span', { className: 'dm-perm-name' }, t.name),
-              h('span', { className: 'dm-perm-desc' }, t.description),
+              h('span', { className: 'dm-perm-desc', title: t.description }, t.descriptionZh || t.description),
               h('span', { className: 'dm-chip ' + (t.allowed ? 'ok' : 'muted') }, t.allowed ? '允许' : '禁止')
             )
           })

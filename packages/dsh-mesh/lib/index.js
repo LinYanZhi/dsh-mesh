@@ -14,6 +14,7 @@
 import { collect, resolveRepo, meshHome, run, nodeExec } from './collect.js'
 import { listDelegations, sessionHistory, taskStatus } from './delegations.js'
 import { probePublicTarget } from './public-probe.js'
+import { permissionZh } from './permissions-zh.js'
 import { networkInterfaces } from 'node:os'
 import net from 'node:net'
 import tls from 'node:tls'
@@ -284,7 +285,7 @@ export function apply(ctx) {
     for (const line of String(r.stdout || '').split(/\r?\n/)) {
       const match = /^\s*(ALLOW|deny)\s+([a-z0-9_]+)\s+(.*)$/i.exec(line)
       if (!match) continue
-      tools.push({ name: match[2], allowed: match[1].toUpperCase() === 'ALLOW', description: match[3].trim() })
+      tools.push({ name: match[2], allowed: match[1].toUpperCase() === 'ALLOW', description: match[3].trim(), descriptionZh: permissionZh(match[2]) })
     }
     return { ok: true, tools }
   })
