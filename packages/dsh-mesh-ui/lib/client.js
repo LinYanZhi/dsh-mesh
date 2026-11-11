@@ -524,7 +524,8 @@ body.light .dm-edge-label { stroke: rgba(255,255,255,.92); }
       var peers = filterSelfPeers(dedupePeers(d.peers || []), d.nodeName)
       var hasPublic = Boolean(publicEntryFor(d.localTunnel || {})) || Boolean(selectedPublicServer()) || peers.some(function (p) { var pt = p.tunnel || {}; return !isLanPeer(p) && Boolean(pt.host) && (pt.kind === 'frp' || pt.kind === 'wan') })
       var acc = sakuraAccountOf(d)
-      var hasSakura = Boolean(acc && ((acc.tunnels || []).length || acc.error)) || selectedSakuraServers().length > 0
+      // 只有用户明确加入的 Sakura 服务器才进入拓扑；账号里有隧道不等于用户同意展示
+      var hasSakura = selectedSakuraServers().length > 0
       return (s.public && hasPublic ? 1 : 0) + (s.sakura && hasSakura ? 1 : 0)
     }
 
@@ -1354,7 +1355,8 @@ function deviceLinkState(data, peer, lanMap) {
     up: selectedSakuraList.some(function (s) { return s.online !== false })
   } : null
   var sakuraAcc = sakuraRaw ? Object.assign({}, sakuraRaw, { tunnels: (sakuraRaw.tunnels || []).filter(tunnelMatchesNode(localTunnel.port)) }) : null
-  var sakuraVisible = show.sakura && Boolean(selectedSakura || (sakuraAcc && ((sakuraAcc.tunnels || []).length || sakuraAcc.error)))
+  // 用户没加入 Sakura 服务器时，拓扑里不显示 Sakura server 回退卡片
+  var sakuraVisible = show.sakura && Boolean(selectedSakura)
   var aliyunPorts = peers.map(function (p) { return isLanPeer(p) ? null : (p.tunnel || {}).port }).filter(Boolean)
   var infra = [
     selectedPublic
