@@ -91,7 +91,7 @@ function nodeLabel(name) { return NODE_LABELS[String(name || '').toLowerCase()] 
     function topologyNodeKeys(data) {
       var d = data || {}
       var peers = filterSelfPeers(dedupePeers(d.peers || []), d.nodeName)
-      var cands = sakuraCandidates().map(function (c) { return 'candidate:' + c.key })
+      var cands = visibleSakuraCandidates().map(function (c) { return 'candidate:' + c.key })
       return ['local'].concat(peers.map(function (peer) { return 'peer:' + peer.name })).concat(cands)
     }
     // 2026-11-10：设备显示顺序（左→右 / 逆时针）——拓扑渲染与拖拽位置表必须共用同一顺序
@@ -475,6 +475,13 @@ body.light .dm-edge-label { stroke: rgba(255,255,255,.92); }
         else window.localStorage.removeItem(SAKURA_CANDIDATES_KEY)
       } catch (e) { /* ignore */ }
     }
+    function sakuraUiEnabled() {
+      try {
+        var f = JSON.parse(window.localStorage.getItem('dsh-mesh-ui.filters.v1') || '{}') || {}
+        return f.sakura !== false
+      } catch (e) { return true }
+    }
+    function visibleSakuraCandidates() { return sakuraUiEnabled() ? sakuraCandidates() : [] }
     function peerTunnelAddrs(data) {
       var out = {}
       ;((data && data.peers) || []).forEach(function (p) {
@@ -1359,7 +1366,7 @@ function deviceLinkState(data, peer, lanMap) {
       tunnel: peer.tunnel || {},
       error: peer.error || ''
     }
-  })).concat(sakuraCandidates().map(function (c) {
+  })).concat(visibleSakuraCandidates().map(function (c) {
     return {
       key: 'candidate:' + c.key,
       candidate: true,
@@ -2773,7 +2780,7 @@ function deviceLinkState(data, peer, lanMap) {
 
         h('div', { className: 'dm-body', style: splitW > 0 ? { '--dm-main-w': splitW + 'px' } : undefined },
           h('div', { className: 'dm-pane' },
-            h(Viewport, { data: data, federated: federated, topoNonce: topoNonce, layout: computeLayout(1 + filterSelfPeers(dedupePeers(data.peers || []), data.nodeName).length + sakuraCandidates().length), selectedKey: selectedKey, onSelect: setSelectedKey }),
+            h(Viewport, { data: data, federated: federated, topoNonce: topoNonce, layout: computeLayout(1 + filterSelfPeers(dedupePeers(data.peers || []), data.nodeName).length + visibleSakuraCandidates().length), selectedKey: selectedKey, onSelect: setSelectedKey }),
             h(DeviceDetails, { data: data, selectedKey: selectedKey })
           ),
           h('div', { className: 'dm-divider', onPointerDown: startSplit, title: '↔ 拖拽调整左右宽度（双击恢复默认）', onDoubleClick: function () { setSplitW(0); try { window.localStorage.removeItem('dsh-mesh-split-w') } catch (error) { /* ignore */ } } }),
