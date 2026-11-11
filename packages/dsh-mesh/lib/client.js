@@ -89,7 +89,8 @@ function nodeLabel(name) { return NODE_LABELS[String(name || '').toLowerCase()] 
     function topologyNodeKeys(data) {
       var d = data || {}
       var peers = filterSelfPeers(dedupePeers(d.peers || []), d.nodeName)
-      return ['local'].concat(peers.map(function (peer) { return 'peer:' + peer.name }))
+      var cands = sakuraCandidates().map(function (c) { return 'candidate:' + c.key })
+      return ['local'].concat(peers.map(function (peer) { return 'peer:' + peer.name })).concat(cands)
     }
     // 2026-11-10：设备显示顺序（左→右 / 逆时针）——拓扑渲染与拖拽位置表必须共用同一顺序
     var FAN_ORDER = ['home', 'home2', 'company', 'company2', 'phone1']
@@ -289,6 +290,7 @@ body.light .dm-edge-label { stroke: rgba(255,255,255,.92); }
 .dm-flt.on { opacity:1; border-color:var(--c); }
 .dm-flt input { margin:0; accent-color:var(--c); }
 .dm-card-node.server { border-radius:12px; background:rgba(128,128,128,.06); }
+.dm-card-node.candidate { opacity:.55; border-style:dashed; border-color:rgba(163,113,247,.6); }
         .dm-chip.type { border-color:rgba(88,166,255,.5); color:#7fb4ff; }
 /* 2026-11-09：三通道虚线流动动画（位移量必须是 dash 周期 11px 的整数倍，否则循环会抽搐） */
 @keyframes dm-dashflow { to { stroke-dashoffset: -22; } }
@@ -465,6 +467,19 @@ body.light .dm-edge-label { stroke: rgba(255,255,255,.92); }
     var SELECTED_SAKURA_KEY = 'dsh-mesh-ui.sakuraServer.v1'
     var SELECTED_PUBLIC_KEY = 'dsh-mesh-ui.publicServer.v1'
     var SELECTED_SAKURA_SERVERS_KEY = 'dsh-mesh-ui.sakuraServers.v2'
+    var SAKURA_CANDIDATES_KEY = 'dsh-mesh-ui.sakuraCandidates.v1'
+    function sakuraCandidates() {
+      try {
+        var list = JSON.parse(window.localStorage.getItem(SAKURA_CANDIDATES_KEY) || '[]')
+        return Array.isArray(list) ? list : []
+      } catch (e) { return [] }
+    }
+    function setSakuraCandidates(list) {
+      try {
+        if (list && list.length) window.localStorage.setItem(SAKURA_CANDIDATES_KEY, JSON.stringify(list))
+        else window.localStorage.removeItem(SAKURA_CANDIDATES_KEY)
+      } catch (e) { /* ignore */ }
+    }
     function readSelectedServer(key) {
       try { return JSON.parse(window.localStorage.getItem(key) || 'null') } catch (e) { return null }
     }
@@ -1310,6 +1325,20 @@ function deviceLinkState(data, peer, lanMap) {
       tunnel: peer.tunnel || {},
       error: peer.error || ''
     }
+  })).concat(sakuraCandidates().map(function (c) {
+    return {
+      key: 'candidate:' + c.key,
+      candidate: true,
+      local: false,
+      up: false,
+      name: c.name || c.host,
+      dsh: '待验证',
+      ports: [],
+      tunnel: { kind: 'sakura', host: c.host, port: c.port, addr: c.addr || (c.host + ':' + c.port) },
+      candidateHost: c.host,
+      candidatePort: c.port,
+      error: '待授权'
+    }
   }))
   // 2026-11-10：按共用顺序排序（与 Viewport 拖拽位置表一致，修复"拖 A 动 B"的 bug）
   var orderKeys = orderedNodeKeys(data)
@@ -1461,6 +1490,7 @@ function deviceLinkState(data, peer, lanMap) {
     var sizeN = sizeOf(n.key)
     if (publicVisible && n.tunnel && n.tunnel.host && !isLanPeer(n) && (n.tunnel.kind === 'frp' || n.tunnel.kind === 'wan')) svgEls = svgEls.concat(curve('pub' + i, pa, aliyunPos, n.publicUp, TRANSPORTS.public, maskHost(n.tunnel.host) + ((n.tunnel.port) ? ':' + n.tunnel.port : ''), sizeN, aliyunSize, edgeRelated(n.key, 'server-aliyun')))
     if (sakuraVisible && n.sakuraTunnel) svgEls = svgEls.concat(curve('sak' + i, pa, sakuraPos, n.sakuraUp === true, TRANSPORTS.sakura, maskText(n.sakuraTunnel.addr || ''), sizeN, sakuraSize, edgeRelated(n.key, 'server-sakura')))
+    if (sakuraVisible && n.candidate) svgEls = svgEls.concat(curve('cand' + i, pa, sakuraPos, false, TRANSPORTS.sakura, maskText(n.tunnel.addr || ''), sizeN, sakuraSize, edgeRelated(n.key, 'server-sakura')))
     if (show.lan && n.lanUp) { var lt = n.lanTunnel || {}; var lanAddr = (lt.ip || lt.host || 'LAN') + (lt.port ? ':' + lt.port : ''); svgEls = svgEls.concat(curve('lan' + i, layout.positions[localNodeIdx], pa, n.lanUp, TRANSPORTS.lan, lanAddr, sizeOf('local'), sizeN, edgeRelated('local', n.key))) }
   })
   var fedItems = []
@@ -1491,7 +1521,7 @@ function deviceLinkState(data, peer, lanMap) {
       var selected = props.selectedKey === node.key
       return h('div', {
         key: node.key,
-        className: 'dm-card-node compact draggable' + (node.local ? ' local' : '') + (node.up ? '' : ' down') + (selected ? ' selected' : '') + (hoverKey === node.key ? ' hovered' : '') + (dragKey === node.key ? ' dragging' : ''),
+        className: 'dm-card-node compact draggable' + (node.local ? ' local' : '') + (node.candidate ? ' candidate' : '') + (node.up ? '' : ' down') + (selected ? ' selected' : '') + (hoverKey === node.key ? ' hovered' : '') + (dragKey === node.key ? ' dragging' : ''),
         onMouseEnter: function () { setHoverKey(node.key) },
         onMouseLeave: function () { setHoverKey(null) },
         style: { left: pos[0] + 'px', top: pos[1] + 'px', maxWidth: '380px', transform: 'translate(-50%,-50%)' },
@@ -1985,6 +2015,12 @@ function deviceLinkState(data, peer, lanMap) {
       var vts = useState(null); var verifyTarget = vts[0]; var setVerifyTarget = vts[1]
       var vcs = useState(''); var verifyCode = vcs[0]; var setVerifyCode = vcs[1]
 
+      useEffect(function () {
+        if (!selectedGroups || !selectedGroups.length) return
+        var group = sakuraServerGroups(tunnels.sakuraAccount)[0]
+        if (group) discoverCandidates(group)
+      }, [])
+
       var tunnels = (props.data && props.data.tunnels) || {}
       var meshPort = Number((props.data && props.data.endpoint && props.data.endpoint.port) || (props.data && props.data.localTunnel && props.data.localTunnel.port) || 8124)
       var sakuraEndpoints = []
@@ -2010,6 +2046,24 @@ function deviceLinkState(data, peer, lanMap) {
       ;(tunnels.sakura && tunnels.sakura.tunnels || []).forEach(function (t) { addEndpoint(t.name, t.host, t.port, t.probe && t.probe.up, t.note, t.localPort) })
       var sakuraServers = sakuraServerGroups(tunnels.sakuraAccount)
       function isGroupSelected(group) { return (selectedGroups || []).some(function (g) { return String(g.key) === String(group.key) }) }
+      function discoverCandidates(group) {
+        var mesh = (group && group.mesh) || []
+        if (!mesh.length) { setSakuraCandidates([]); if (props.onChanged) props.onChanged(); return }
+        setBusy(true); setMsg('正在探测隧道另一端的 mesh 节点…')
+        Promise.all(mesh.map(function (t) {
+          return jsonFetch('/api/dsh-mesh/public/probe', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ host: t.host, port: t.remotePort || t.port, sakura: true }) })
+            .then(function (j) {
+              if (!j || !j.compatible || !j.protocol || j.protocol.service !== 'dsh-mesh') return null
+              var addr = t.host + ':' + (t.remotePort || t.port)
+              return { key: addr, addr: addr, host: t.host, port: t.remotePort || t.port, name: j.protocol.node || t.name || t.note || addr, note: t.note || '', version: j.protocol.version || '', tunnel: t.name || '' }
+            }).catch(function () { return null })
+        })).then(function (rows) {
+          var list = rows.filter(Boolean)
+          setSakuraCandidates(list)
+          setMsg(list.length ? ('发现 ' + list.length + ' 个 mesh 候选节点，待验证') : '隧道可探测，但没有发现 dsh-mesh 节点')
+          if (props.onChanged) props.onChanged()
+        }).finally(function () { setBusy(false) })
+      }
       function toggleGroup(group) {
         var was = isGroupSelected(group)
         var next = (selectedGroups || []).filter(function (g) { return String(g.key) !== String(group.key) })
@@ -2017,6 +2071,8 @@ function deviceLinkState(data, peer, lanMap) {
         setSelectedGroups(next)
         setSelectedSakuraServers(next)
         setMsg(was ? '已从拓扑移出服务器：' + group.name : '已加入拓扑服务器：' + group.name + '（' + group.meshCount + ' 条 mesh 隧道）')
+        if (was) setSakuraCandidates([])
+        if (!was) discoverCandidates(group)
         if (props.onChanged) props.onChanged()
       }
       function tunnelAddr(t) { return String(t.host || '') + ':' + String(t.remotePort || t.port || '') }
@@ -2039,7 +2095,13 @@ function deviceLinkState(data, peer, lanMap) {
         setBusy(true); setMsg('')
         jsonFetch('/api/dsh-mesh/lan/pair', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ url: 'https://' + tunnelAddr(t), code: code, name: t.note || t.name || t.host, fingerprint: '' }) })
           .then(function (j) {
-            if (j.ok) { setMsg('已验证并加入节点：' + (t.name || tunnelAddr(t))); setVerifyTarget(null); setVerifyCode(''); if (props.onChanged) props.onChanged() }
+            if (j.ok) {
+              setMsg('已验证并加入节点：' + (t.name || tunnelAddr(t)))
+              var addr = tunnelAddr(t)
+              setSakuraCandidates(sakuraCandidates().filter(function (c) { return c.key !== addr }))
+              setVerifyTarget(null); setVerifyCode('')
+              if (props.onChanged) props.onChanged()
+            }
             else setMsg(String(j.stderr || j.error || j.stdout || '验证失败').slice(0, 300))
           }).catch(function (e) { setMsg(String(e.message || e)) }).finally(function () { setBusy(false) })
       }
@@ -2076,8 +2138,7 @@ function deviceLinkState(data, peer, lanMap) {
         setHost(online.host); setPort(online.port); persist(mode, online.host, online.port)
         runProbe(online.host, online.port, true)
       }
-      function serverKey(it) { return String(it.host || '') + ':' + String(it.port || '') }
-      function isServerSelected(it) { return Boolean(selectedServer && serverKey(selectedServer) === serverKey(it)) }
+      function serverKey(it) { return String(it.host || '') + ':' + String(it.port || '') }      function isServerSelected(it) { return Boolean(selectedServer && serverKey(selectedServer) === serverKey(it)) }
       function isPublicSelected(it) { return Boolean(selectedPublic && serverKey(selectedPublic) === serverKey(it)) }
       function togglePublicServer(it) {
         if (!it || !it.host || !it.port) return
@@ -2653,7 +2714,7 @@ function deviceLinkState(data, peer, lanMap) {
 
         h('div', { className: 'dm-body', style: splitW > 0 ? { '--dm-main-w': splitW + 'px' } : undefined },
           h('div', { className: 'dm-pane' },
-            h(Viewport, { data: data, federated: federated, layout: computeLayout(1 + filterSelfPeers(dedupePeers(data.peers || []), data.nodeName).length), selectedKey: selectedKey, onSelect: setSelectedKey }),
+            h(Viewport, { data: data, federated: federated, layout: computeLayout(1 + filterSelfPeers(dedupePeers(data.peers || []), data.nodeName).length + sakuraCandidates().length), selectedKey: selectedKey, onSelect: setSelectedKey }),
             h(InfraPanels, { data: data }),
             h(DeviceDetails, { data: data, selectedKey: selectedKey })
           ),
