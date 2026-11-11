@@ -2156,40 +2156,31 @@ function deviceLinkState(data, peer, lanMap) {
           )
           : h('div', null,
             h('div', { className: 'dm-sub' }, 'Sakura 是软件，下面是它提供的公网服务器；只有本地端口指向 mesh 的隧道才会进入网络，其他隧道只做详情。'),
-            sakuraServers.length ? h('div', { className: 'dm-sakura-servers' }, sakuraServers.map(function (g) {
-              var selected = isGroupSelected(g)
-              return h('div', { className: 'dm-sakura-server' + (selected ? ' selected' : ''), key: g.key },
-                h('div', { className: 'dm-sakura-server-head' },
-                  h('span', { className: 'dm-dot ' + (g.online ? 'ok' : 'muted') }),
-                  h('span', { className: 'dm-sakura-server-name' }, g.name),
-                  h('span', { className: 'dm-sub dm-mono' }, g.host || '—'),
-                  h('span', { className: 'dm-sub' }, g.meshCount + ' mesh / ' + g.otherCount + ' 其他'),
-                  h('button', { className: 'dm-btn' + (selected ? ' bad' : ''), disabled: busy, onClick: function () { toggleGroup(g) } }, selected ? '移出拓扑' : '加入拓扑')
-                ),
-                g.mesh.length ? h('div', { className: 'dm-sakura-server-mesh' },
-                  g.mesh.map(function (t, i) {
-                    var verified = isTunnelVerified(t)
-                    return h('div', { className: 'dm-sakura-tunnel' + ((!selected || !verified) ? ' pending' : ''), key: 'm' + i },
-                      h('span', { className: 'dm-dot ' + (verified ? 'ok' : 'muted') }),
-                      h('span', { className: 'dm-sakura-tunnel-name' }, t.name || 'mesh'),
-                      h('span', { className: 'dm-sub dm-mono' }, (t.addr || (t.host + ':' + t.remotePort))),
-                      h('span', { className: 'dm-sub' }, t.note || ''),
-                      h('span', { className: 'dm-chip ' + (verified ? 'ok' : 'muted') }, verified ? '已验证' : '待验证'),
-                      !verified ? h('button', { className: 'dm-btn', disabled: busy, onClick: function () { startVerify(t) } }, '验证') : null
-                    )
-                  })
-                ) : null,
-                g.other.length ? h('details', { className: 'dm-sakura-other' },
-                  h('summary', null, '其他隧道 ' + g.other.length + ' 条（仅详情）'),
-                  g.other.map(function (t, i) {
-                    return h('div', { className: 'dm-sakura-tunnel', key: 'o' + i },
-                      h('span', { className: 'dm-sub dm-mono' }, (t.name || '—') + ' · ' + (t.addr || '')),
-                      h('span', { className: 'dm-sub' }, t.note || '')
-                    )
-                  })
-                ) : null
-              )
-            })) : h('div', { className: 'dm-empty' }, '未读取到 Sakura 服务器。'),
+            sakuraServers.length ? h('div', { className: 'dm-sakura-server-bar' },
+              h('span', { className: 'dm-dot ' + (sakuraServers[0].online ? 'ok' : 'muted') }),
+              h('span', { className: 'dm-sakura-server-name' }, sakuraServers[0].name),
+              h('span', { className: 'dm-sub dm-mono' }, sakuraServers[0].host || '—'),
+              h('span', { className: 'dm-sub' }, sakuraServers[0].meshCount + ' mesh / ' + sakuraServers[0].otherCount + ' 其他'),
+              h('button', { className: 'dm-btn' + (isGroupSelected(sakuraServers[0]) ? ' bad' : ''), disabled: busy, onClick: function () { toggleGroup(sakuraServers[0]) } }, isGroupSelected(sakuraServers[0]) ? '移出拓扑' : '加入拓扑')
+            ) : h('div', { className: 'dm-empty' }, '未读取到 Sakura 服务器。'),
+            sakuraEndpoints.length ? h('table', { className: 'dm-lan-table dm-sakura-table' },
+              h('thead', null, h('tr', null, h('th', null, '隧道'), h('th', null, '备注'), h('th', null, '地址'), h('th', null, '本地端口'), h('th', null, '状态'), h('th', null, '操作'))),
+              h('tbody', null, sakuraEndpoints.map(function (it, i) {
+                var target = { host: it.host, port: it.port, remotePort: it.port, name: it.name, note: it.note, localPort: it.localPort, mesh: it.mesh }
+                var verified = isTunnelVerified(target)
+                return h('tr', { key: i },
+                  h('td', { title: it.name }, it.name),
+                  h('td', { className: 'dm-sakura-note', title: it.note || '' }, it.note || '—'),
+                  h('td', { className: 'dm-mono' }, it.host + ':' + it.port),
+                  h('td', { className: 'dm-mono' }, it.localPort || '—'),
+                  h('td', null, h('span', { className: 'dm-chip ' + (it.up ? 'ok' : 'muted') }, it.up ? '在线' : '未探测'), it.mesh === false ? h('span', { className: 'dm-chip bad', style: { marginLeft: 4 } }, '非 mesh') : null),
+                  h('td', { className: 'dm-lan-actions' },
+                    h('button', { className: 'dm-btn', disabled: busy, onClick: function () { setHost(it.host); setPort(it.port); persist(mode, it.host, it.port); runProbe(it.host, it.port, true) } }, '检测'),
+                    it.mesh === false ? null : (verified ? h('span', { className: 'dm-chip ok' }, '已验证') : h('button', { className: 'dm-btn', disabled: busy, onClick: function () { startVerify(target) } }, '验证'))
+                  )
+                )
+              }))
+            ) : h('div', { className: 'dm-empty' }, '本机没有配置樱花隧道。'),
             verifyTarget ? h('div', { className: 'dm-verify-form' },
               h('div', { className: 'dm-sub' }, '验证节点：' + (verifyTarget.name || tunnelAddr(verifyTarget)) + ' · 输入对方生成的一次性配对码'),
               h('div', { className: 'dm-public-form' },
@@ -3409,6 +3400,7 @@ body[data-ds-dark-theme] .dm-dg-fs-item.active { background:rgba(88,166,255,.28)
 .dm-sakura-tunnel-name { font-weight:600; }
 .dm-sakura-other { margin-top:5px; font-size:11px; }
 .dm-sakura-other > summary { cursor:pointer; opacity:.6; }
+.dm-sakura-server-bar { display:flex; align-items:center; gap:7px; flex-wrap:wrap; margin-top:7px; padding:6px 8px; border:1px solid rgba(163,113,247,.35); border-radius:8px; background:rgba(163,113,247,.06); font-size:12px; }
 .dm-verify-form { margin-top:7px; padding:7px 8px; border:1px solid rgba(88,166,255,.4); border-radius:8px; background:rgba(88,166,255,.07); }
 .dm-content, .dm-content > .dm-root { height:100%; min-height:0; }
 .dm-root { display:flex; flex-direction:column; min-height:0; }
