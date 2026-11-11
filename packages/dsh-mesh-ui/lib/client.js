@@ -463,7 +463,7 @@ body.light .dm-edge-label { stroke: rgba(255,255,255,.92); }
     function selectedSakuraServers() {
       try {
         var list = JSON.parse(window.localStorage.getItem(SELECTED_SAKURA_SERVERS_KEY) || '[]')
-        return Array.isArray(list) ? list : []
+        return Array.isArray(list) ? list.slice(0, 1) : []
       } catch (e) { return [] }
     }
     function setSelectedSakuraServers(list) {
@@ -473,25 +473,21 @@ body.light .dm-edge-label { stroke: rgba(255,255,255,.92); }
       } catch (e) { /* ignore */ }
     }
     function sakuraServerGroups(account) {
-      var groups = []
-      var map = {}
-      ;((account && account.tunnels) || []).forEach(function (t) {
-        var key = String(t.nodeId || t.nodeName || t.host || 'unknown')
-        if (!map[key]) {
-          map[key] = { key: key, nodeId: t.nodeId || null, name: t.nodeName || t.host || 'Sakura 服务器', host: t.host || '', mesh: [], other: [] }
-          groups.push(map[key])
-        }
-        var g = map[key]
+      var tunnels = (account && account.tunnels) || []
+      if (!tunnels.length) return []
+      var g = { key: 'sakura', nodeId: null, name: 'Sakura 穿透', host: '', mesh: [], other: [] }
+      var hosts = []
+      tunnels.forEach(function (t) {
+        if (t.host && hosts.indexOf(t.host) < 0) hosts.push(t.host)
         var lp = Number(t.localPort) || null
         var mesh = lp === 8124 || lp === 8126 || /(dsh|mesh)/i.test(String(t.name || '') + ' ' + String(t.note || ''))
-        g[mesh ? 'mesh' : 'other'].push(t)
+        ;(mesh ? g.mesh : g.other).push(t)
       })
-      groups.forEach(function (g) {
-        g.online = g.mesh.some(function (t) { return t.online !== false }) || (g.other || []).some(function (t) { return t.online === true })
-        g.meshCount = g.mesh.length
-        g.otherCount = g.other.length
-      })
-      return groups
+      g.host = hosts.join(' / ')
+      g.online = g.mesh.some(function (t) { return t.online !== false }) || g.other.some(function (t) { return t.online === true })
+      g.meshCount = g.mesh.length
+      g.otherCount = g.other.length
+      return [g]
     }
 
     function visibleServerCount(data, show) {
@@ -1310,7 +1306,7 @@ function deviceLinkState(data, peer, lanMap) {
   var selectedSakuraList = selectedSakuraServers()
   var selectedMeshTotal = selectedSakuraList.reduce(function (n, s) { return n + ((s.mesh || []).length) }, 0)
   var selectedSakura = selectedSakuraList.length ? {
-    name: 'Sakura 穿透 · ' + selectedSakuraList.length + ' 台服务器',
+    name: 'Sakura 穿透',
     host: selectedSakuraList[0].host || '',
     note: selectedMeshTotal + ' 条 mesh 隧道',
     up: selectedSakuraList.some(function (s) { return s.online !== false })
