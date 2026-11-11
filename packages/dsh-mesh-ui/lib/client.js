@@ -2073,17 +2073,23 @@ function deviceLinkState(data, peer, lanMap) {
         var code = String(verifyCode || '').trim()
         if (!t) return
         if (!code) { setMsg('请输入对方生成的配对码'); return }
-        setBusy(true); setMsg('')
-        jsonFetch('/api/dsh-mesh/lan/pair', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ url: 'https://' + tunnelAddr(t), code: code, name: t.note || t.name || t.host, fingerprint: '' }) })
+        setBusy(true); setMsg('正在读取对端证书指纹…')
+        jsonFetch('/api/dsh-mesh/public/probe', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ host: t.host, port: t.remotePort || t.port, sakura: true }) })
+          .then(function (probe) {
+            if (!probe || !probe.tls || !probe.tls.ok || !probe.tls.fingerprint256) {
+              throw new Error('无法读取对端 TLS 证书指纹：' + String((probe && probe.tls && probe.tls.error) || (probe && probe.error) || 'TLS 未建立'))
+            }
+            setMsg('证书指纹已获取，正在配对…')
+            return jsonFetch('/api/dsh-mesh/lan/pair', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ url: 'https://' + tunnelAddr(t), code: code, name: t.note || t.name || t.host, fingerprint: probe.tls.fingerprint256 }) })
+          })
           .then(function (j) {
-            if (j.ok) {
+            if (j && j.ok) {
               setMsg('已验证并加入节点：' + (t.name || tunnelAddr(t)))
               var addr = tunnelAddr(t)
               setSakuraCandidates(sakuraCandidates().filter(function (c) { return c.key !== addr }))
               setVerifyTarget(null); setVerifyCode('')
               if (props.onChanged) props.onChanged()
-            }
-            else setMsg(String(j.stderr || j.error || j.stdout || '验证失败').slice(0, 300))
+            } else if (j) setMsg(String(j.stderr || j.error || j.stdout || '验证失败').slice(0, 300))
           }).catch(function (e) { setMsg(String(e.message || e)) }).finally(function () { setBusy(false) })
       }
 
