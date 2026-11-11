@@ -2228,10 +2228,10 @@ function deviceLinkState(data, peer, lanMap) {
       })
       var hiddenPanels = panelState[0]; var setHiddenPanels = panelState[1]
       var PANEL_ITEMS = [
-        ['usage', '使用说明'], ['lan', '局域网连接'], ['public', '公网连接'],
-        ['nodes', '节点管理'], ['permissions', '权限设置'], ['transfers', '文件传输'],
-        ['instances', '本机实例'], ['versions', '版本一致性'], ['delegations', '委托台账'],
-        ['alerts', '告警历史'], ['diagnostics', '诊断建议']
+        { id: 'usage', label: '使用说明' }, { id: 'lan', label: '局域网连接' }, { id: 'public', label: '公网连接' },
+        { id: 'nodes', label: '节点管理' }, { id: 'permissions', label: '权限设置' }, { id: 'transfers', label: '文件传输' },
+        { id: 'instances', label: '本机实例' }, { id: 'versions', label: '版本一致性' }, { id: 'delegations', label: '委托台账' },
+        { id: 'alerts', label: '告警历史' }, { id: 'diagnostics', label: '诊断建议' }
       ]
       function togglePanel(id) {
         setHiddenPanels(function (prev) {
