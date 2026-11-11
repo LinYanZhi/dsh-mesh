@@ -17,7 +17,7 @@
 import { spawn, execFileSync } from 'node:child_process'
 import { existsSync, appendFileSync, mkdirSync, openSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
-import { dirname, join } from 'node:path'
+import { basename, dirname, join } from 'node:path'
 import { homedir } from 'node:os'
 import net from 'node:net'
 
@@ -32,11 +32,30 @@ export const inject = []
 function resolveMeshRoot() {
   const candidates = []
   if (process.env.DSH_MESH_REPO) candidates.push(process.env.DSH_MESH_REPO)
-  try {
-    const requireFromPlugin = createRequire(import.meta.url)
-    candidates.push(dirname(requireFromPlugin.resolve('dsh-mesh-node/package.json')))
-  } catch {
-    /* dependency not installed */
+  function pushNodeFromRequire(req) {
+    try {
+      let dir = dirname(req.resolve('dsh-mesh-node'))
+      for (let i = 0; i < 5; i++) {
+        if (existsSync(join(dir, 'src', 'cli.js'))) { candidates.push(dir); return true }
+        const parent = dirname(dir)
+        if (parent === dir) break
+        dir = parent
+      }
+    } catch { /* try next */ }
+    return false
+  }
+  try { pushNodeFromRequire(createRequire(import.meta.url)) } catch { /* virtual module URL */ }
+  // DSH 有时用虚拟模块 URL 装载 patch，createRequire(import.meta.url) 解析不到同 profile 的依赖。
+  const dshHomes = new Set([process.env.DSH_HOME, process.env.USERPROFILE ? join(process.env.USERPROFILE, '.dsh2') : null, process.env.USERPROFILE ? join(process.env.USERPROFILE, '.dsh1') : null, join(homedir(), '.dsh2'), join(homedir(), '.dsh1'), join(homedir(), '.dsh0'), join(homedir(), '.dsh')])
+  // 3082 计划任务/S4U 会话下 homedir 可能不是用户目录；用 DSH_MESH_HOME 反推同级 DSH_HOME。
+  if (process.env.DSH_MESH_HOME) {
+    const meshBase = basename(process.env.DSH_MESH_HOME)
+    if (/-mesh$/i.test(meshBase)) dshHomes.add(join(dirname(process.env.DSH_MESH_HOME), '.' + meshBase.replace(/-mesh$/i, '')))
+  }
+  for (const dshHome of dshHomes) {
+    if (!dshHome) continue
+    candidates.push(join(dshHome, 'profiles', 'web', 'node_modules', 'dsh-mesh-node'))
+    try { pushNodeFromRequire(createRequire(join(dshHome, 'profiles', 'web', 'package.json'))) } catch { /* try next */ }
   }
   // Legacy phone-kit layout: keep working when the file really exists.
   candidates.push('/root/dsh-mesh-kit/mesh')

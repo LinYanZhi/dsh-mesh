@@ -13,7 +13,7 @@
 // 归宿：reusable（dsh-mesh/plugin/dsh-mesh-ui/lib/）
 
 window.__ModuleLoader__.load({
-  id: 'dsh-mesh-ui',
+  id: '@linyanzhi/dsh-mesh',
   factory: (require) => {
     var module = { exports: {} }
     var exports = module.exports

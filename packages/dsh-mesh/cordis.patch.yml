@@ -1,5 +1,7 @@
-# dsh-mesh: install host bridge + autostart; this package itself is the sidebar UI
+# dsh-mesh: mount the package itself (scoped id), then host bridge + autostart
 - insert:
+    - id: "@linyanzhi/dsh-mesh"
+      name: "@linyanzhi/dsh-mesh"
     - id: dsh-mesh-host
       name: dsh-mesh-host
     - id: dsh-mesh-autostart
