@@ -1577,9 +1577,11 @@ function deviceLinkState(data, peer, lanMap) {
           + (ls.httpUp ? "" : "（HTTP 超时，隧道" + (ls.tcpUp ? "通" : "断") + "）")
       }
 
-      // 2026-11-10：点击节点后自动滚动到对应设备卡片，保证卡片完整可见
+      // 2026-11-11：首次进入不自动滚动；只有用户点击设备后才滚到对应卡片
       var selectedDeviceRef = useRef(null)
+      var firstSelectedRef = useRef(true)
       useEffect(function () {
+        if (firstSelectedRef.current) { firstSelectedRef.current = false; return }
         if (!props.selectedKey || !selectedDeviceRef.current) return
         var timer = setTimeout(function () {
           try { selectedDeviceRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' }) } catch (error) { selectedDeviceRef.current.scrollIntoView() }
@@ -1735,43 +1737,35 @@ function deviceLinkState(data, peer, lanMap) {
     }
 
     // 2026-11-10：节点管理（从本机移除 peer / 吊销入站 token）。
+    // 2026-11-11：节点管理（只列设备；移除仅本机生效，跨设备同步待定）
     function NodeManager(props) {
       var sp = useState(null); var peers = sp[0]; var setPeers = sp[1]
-      var st = useState(null); var tokens = st[0]; var setTokens = st[1]
       var sb = useState(false); var busy = sb[0]; var setBusy = sb[1]
       var sm = useState(''); var msg = sm[0]; var setMsg = sm[1]
       function refresh() {
         setBusy(true)
-        Promise.all([jsonFetch('/api/dsh-mesh/peers'), jsonFetch('/api/dsh-mesh/tokens')]).then(function (r) {
-          if (r[0].ok) setPeers(r[0].peers || []); else setMsg(r[0].error || '读取节点失败')
-          if (r[1].ok) setTokens(r[1].tokens || [])
-        }).finally(function () { setBusy(false) })
+        jsonFetch('/api/dsh-mesh/peers').then(function (r) {
+          if (r.ok) setPeers(r.peers || []); else setMsg(r.error || '读取节点失败')
+        }).catch(function (e) { setMsg(String(e.message || e)) }).finally(function () { setBusy(false) })
       }
       useEffect(function () { refresh() }, [])
       function togglePeer(peer) {
         setBusy(true); setMsg('')
-        fetch('/api/dsh-mesh/peers/toggle', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: peer.id, disabled: !peer.disabled }) })
-          .then(function (r) { return r.text() }).then(function (text) { try { var j = JSON.parse(text); setMsg(j.ok ? ((peer.disabled ? '已启用 ' : '已禁用 ') + peer.name) : ('操作失败：' + (j.stderr || j.error || '').slice(0, 200))) } catch (e) { setMsg(text.slice(0, 120)) } refresh(); if (props.onChanged) props.onChanged() })
-          .finally(function () { setBusy(false) })
+        jsonFetch('/api/dsh-mesh/peers/toggle', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: peer.id, disabled: !peer.disabled }) })
+          .then(function (j) { setMsg(j.ok ? ((peer.disabled ? '已启用 ' : '已禁用 ') + peer.name) : ('操作失败：' + (j.stderr || j.error || '').slice(0, 200))); refresh(); if (props.onChanged) props.onChanged() })
+          .catch(function (e) { setMsg(String(e.message || e)) }).finally(function () { setBusy(false) })
       }
       function removePeer(peer) {
-        if (!window.confirm('从本机移除节点「' + peer.name + '」？\n这会删除本机到它的连接；对方的入站 token 需在下方吊销。')) return
+        if (!window.confirm('从当前网络移除设备「' + peer.name + '」？\n\n注意：目前只移除本机与它的连接，不会同步通知其他设备；多设备同步待实现。')) return
         setBusy(true); setMsg('')
         jsonFetch('/api/dsh-mesh/peers/remove', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: peer.id }) })
-          .then(function (j) { setMsg(j.ok ? '已移除 ' + peer.name : ('移除失败：' + (j.stderr || j.error || '').slice(0, 200))); refresh(); if (props.onChanged) props.onChanged() })
-          .finally(function () { setBusy(false) })
-      }
-      function revokeToken(tok) {
-        if (!window.confirm('吊销入站 token「' + (tok.note || tok.id) + '」？\n该凭据对应的对端会立即失去访问。')) return
-        setBusy(true); setMsg('')
-        jsonFetch('/api/dsh-mesh/tokens/revoke', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: tok.id }) })
-          .then(function (j) { setMsg(j.ok ? '已吊销 ' + tok.id : ('吊销失败：' + (j.stderr || j.error || '').slice(0, 200))); refresh(); if (props.onChanged) props.onChanged() })
-          .finally(function () { setBusy(false) })
+          .then(function (j) { setMsg(j.ok ? '已从本机移除 ' + peer.name : ('移除失败：' + (j.stderr || j.error || '').slice(0, 200))); refresh(); if (props.onChanged) props.onChanged() })
+          .catch(function (e) { setMsg(String(e.message || e)) }).finally(function () { setBusy(false) })
       }
       return h('div', { className: 'dm-nodes' },
         h('div', { className: 'dm-lan-row' },
-          h('button', { className: 'dm-btn', disabled: busy, onClick: refresh }, '刷新节点'),
-          h('span', { className: 'dm-sub' }, '移除只影响本机；要让对方也失去访问，请吊销对应入站 token')
+          h('button', { className: 'dm-btn', disabled: busy, onClick: refresh }, '刷新设备'),
+          h('span', { className: 'dm-sub' }, '仅列出设备节点；移除只影响本机，跨设备同步暂未实现。')
         ),
         msg ? h('div', { className: 'dm-sub', style: { marginTop: 6 } }, msg) : null,
         peers === null ? h('div', { className: 'dm-sub' }, '加载中…') :
@@ -1781,23 +1775,12 @@ function deviceLinkState(data, peer, lanMap) {
               h('span', { className: 'dm-node-name' }, peer.name + (peer.disabled ? '（已禁用）' : '')),
               h('span', { className: 'dm-node-url' }, maskText(peer.url || '')),
               h('button', { className: 'dm-btn', disabled: busy, onClick: function () { togglePeer(peer) } }, peer.disabled ? '启用' : '禁用'),
-              h('button', { className: 'dm-btn bad', disabled: busy, onClick: function () { removePeer(peer) } }, '移除')
+              h('button', { className: 'dm-btn bad', disabled: busy, onClick: function () { removePeer(peer) } }, '移出网络')
             )
-          }) : h('div', { className: 'dm-sub' }, '没有直接配对的节点'),
-        tokens && tokens.length ? h('details', { className: 'dm-details', style: { marginTop: 8 } },
-          h('summary', null, '入站 token（' + tokens.length + '）'),
-          tokens.map(function (tok) {
-            return h('div', { className: 'dm-node-row', key: tok.id },
-              h('span', { className: 'dm-node-name' }, tok.id),
-              h('span', { className: 'dm-node-url' }, (tok.note || '') + (tok.role ? ' · ' + tok.role : '')),
-              h('button', { className: 'dm-btn bad', disabled: busy, onClick: function () { revokeToken(tok) } }, '吊销')
-            )
-          })
-        ) : null
+          }) : h('div', { className: 'dm-sub' }, '没有直接配对的设备节点')
       )
     }
 
-    // 2026-11-11：公网服务器检测（输入 IP/域名，可选樱花隧道匹配，验证 dsh-mesh /health 协议）
     function PublicProbe(props) {
       var saved = {}
       try { saved = JSON.parse(window.localStorage.getItem('dsh-mesh-ui.publicProbe.v1') || '{}') || {} } catch (_) { saved = {} }
@@ -1882,6 +1865,181 @@ function deviceLinkState(data, peer, lanMap) {
             }) : h('div', { className: 'dm-sub' }, '没有匹配到本机樱花隧道入口；仍可按 IP/端口直连检测。')
           ) : null
         ) : null
+      )
+    }
+
+    // 2026-11-11：公网连接（直连手填 / 樱花自动检测）——旧 PublicProbe 保留但不再挂载
+    function PublicConnection(props) {
+      var saved = {}
+      try { saved = JSON.parse(window.localStorage.getItem('dsh-mesh-ui.publicConnection.v2') || '{}') || {} } catch (_) { saved = {} }
+      var ms = useState(saved.mode === 'sakura' ? 'sakura' : 'direct'); var mode = ms[0]; var setMode = ms[1]
+      var hs = useState(saved.host || ''); var host = hs[0]; var setHost = hs[1]
+      var ps = useState(saved.port || 8124); var port = ps[0]; var setPort = ps[1]
+      var rs = useState(null); var result = rs[0]; var setResult = rs[1]
+      var bs = useState(false); var busy = bs[0]; var setBusy = bs[1]
+      var msgs = useState(''); var msg = msgs[0]; var setMsg = msgs[1]
+
+      var tunnels = (props.data && props.data.tunnels) || {}
+      var sakuraEndpoints = []
+      function addEndpoint(name, h, p, up) {
+        h = String(h || ''); p = String(p || '')
+        if (!h || !p) return
+        if (sakuraEndpoints.some(function (x) { return x.host === h && x.port === p })) return
+        sakuraEndpoints.push({ name: name || '樱花隧道', host: h, port: p, up: up === true })
+      }
+      ;(tunnels.sakura && tunnels.sakura.tunnels || []).forEach(function (t) { addEndpoint(t.name, t.host, t.port, t.probe && t.probe.up) })
+      ;(tunnels.sakuraAccount && tunnels.sakuraAccount.tunnels || []).forEach(function (t) {
+        if (t.host && t.port) addEndpoint(t.name, t.host, t.port, t.online === true)
+        else if (t.addr) { var m = /^([^:]+):(\d+)$/.exec(String(t.addr)); if (m) addEndpoint(t.name, m[1], m[2], t.online === true) }
+      })
+
+      function persist(nextMode, nextHost, nextPort) {
+        try { window.localStorage.setItem('dsh-mesh-ui.publicConnection.v2', JSON.stringify({ mode: nextMode, host: nextHost, port: nextPort })) } catch (_) {}
+      }
+      function runProbe(nextHost, nextPort, nextSakura) {
+        var h = String(nextHost || '').trim(); var p = Number(nextPort)
+        if (!h) { setMsg('请输入公网 IP 或域名'); return }
+        if (!Number.isInteger(p) || p < 1 || p > 65535) { setMsg('端口必须是 1-65535'); return }
+        setBusy(true); setMsg(''); setResult(null)
+        jsonFetch('/api/dsh-mesh/public/probe', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ host: h, port: p, sakura: nextSakura === true }) })
+          .then(function (j) { setResult(j); if (!j.ok && j.error) setMsg(String(j.error)) })
+          .catch(function (e) { setMsg(String(e.message || e)) })
+          .finally(function () { setBusy(false) })
+      }
+      function switchMode(next) {
+        setMode(next); setResult(null); setMsg(''); persist(next, host, port)
+      }
+      function autoSakura() {
+        var online = sakuraEndpoints.filter(function (x) { return x.up })[0] || sakuraEndpoints[0]
+        if (!online) { setMsg('本机没有检测到樱花隧道入口'); return }
+        setHost(online.host); setPort(online.port); persist(mode, online.host, online.port)
+        runProbe(online.host, online.port, true)
+      }
+      function row(k, v, tone) {
+        if (v == null || v === '') return null
+        return h('div', { className: 'dm-public-row' }, h('span', { className: 'dm-public-k' }, k), h('span', { className: 'dm-public-v ' + (tone || '') }, String(v)))
+      }
+      var proto = result && result.protocol
+      var sak = result && result.sakura
+      return h('div', { className: 'dm-public' },
+        h('div', { className: 'dm-pub-tabs' },
+          h('button', { className: 'dm-pub-tab' + (mode === 'direct' ? ' active' : ''), onClick: function () { switchMode('direct') } }, '公网直连'),
+          h('button', { className: 'dm-pub-tab' + (mode === 'sakura' ? ' active' : ''), onClick: function () { switchMode('sakura') } }, '樱花穿透')
+        ),
+        mode === 'direct'
+          ? h('div', null,
+            h('div', { className: 'dm-sub' }, '公网直连需要你提供服务器地址和端口。适合有公网 IP、端口映射或自建 frps 的节点。'),
+            h('div', { className: 'dm-public-form' },
+              h('input', { type: 'text', value: host, placeholder: '公网 IP 或域名', spellCheck: false, onChange: function (e) { setHost(e.target.value) } }),
+              h('input', { type: 'number', min: 1, max: 65535, value: port, placeholder: '端口', onChange: function (e) { setPort(e.target.value) } }),
+              h('button', { className: 'dm-btn primary', disabled: busy, onClick: function () { persist(mode, host, port); runProbe(host, port, false) } }, busy ? '检测中…' : '检测')
+            )
+          )
+          : h('div', null,
+            h('div', { className: 'dm-sub' }, '自动读取本机樱花隧道入口，并检测它是否能响应 dsh-mesh 协议。'),
+            sakuraEndpoints.length
+              ? h('table', { className: 'dm-lan-table dm-sakura-table' },
+                h('thead', null, h('tr', null, h('th', null, '隧道'), h('th', null, '地址'), h('th', null, '状态'), h('th', null, '操作'))),
+                h('tbody', null, sakuraEndpoints.map(function (it, i) {
+                  return h('tr', { key: i },
+                    h('td', { title: it.name }, it.name),
+                    h('td', { className: 'dm-mono' }, it.host + ':' + it.port),
+                    h('td', null, h('span', { className: 'dm-chip ' + (it.up ? 'ok' : 'muted') }, it.up ? '在线' : '未探测')),
+                    h('td', { className: 'dm-lan-actions' }, h('button', { className: 'dm-btn', disabled: busy, onClick: function () { setHost(it.host); setPort(it.port); persist(mode, it.host, it.port); runProbe(it.host, it.port, true) } }, '检测'))
+                  )
+                }))
+              )
+              : h('div', { className: 'dm-empty' }, '本机没有配置樱花隧道。'),
+            h('div', { className: 'dm-lan-row' },
+              h('button', { className: 'dm-btn primary', disabled: busy || !sakuraEndpoints.length, onClick: autoSakura }, busy ? '检测中…' : '自动检测樱花隧道'),
+              h('span', { className: 'dm-sub' }, '优先选择在线隧道；只读探测，不会打开或切换隧道。')
+            )
+          ),
+        msg ? h('div', { className: 'dm-sub dm-public-msg' }, msg) : null,
+        result ? h('div', { className: 'dm-public-res' },
+          h('div', { className: 'dm-public-summary' },
+            h('span', { className: 'dm-chip ' + (result.compatible ? 'ok' : 'bad') }, result.compatible ? '协议兼容' : '协议不匹配'),
+            h('span', { className: 'dm-sub dm-mono' }, result.host + ':' + result.port)
+          ),
+          row('TCP', result.tcp && result.tcp.ok ? '可达 · ' + (result.tcp.latencyMs || 0) + 'ms' : (result.tcp && result.tcp.error || '不可达'), result.tcp && result.tcp.ok ? 'good' : 'bad'),
+          row('TLS', result.tls && result.tls.ok ? '证书可读 · ' + (result.tls.fingerprint256 ? result.tls.fingerprint256.slice(0, 23) + '…' : '') : '未建立 TLS', result.tls && result.tls.ok ? 'good' : 'muted'),
+          row('协议', proto && proto.ok ? ('dsh-mesh · v' + (proto.version || '?') + ' · ' + (proto.node || '?')) : (proto && proto.error || '未验证'), proto && proto.ok ? 'good' : 'bad'),
+          proto && proto.ok ? row('通道', (proto.channel || '') + (proto.tls ? ' · TLS' : '') + (proto.pairing && proto.pairing.enabled ? ' · 允许配对' : '')) : null,
+          sak ? h('div', { className: 'dm-public-sakura' },
+            h('div', { className: 'dm-sub' }, sak.available ? ('樱花账号：' + sak.online + '/' + sak.total + ' 在线') : ('樱花账号不可用：' + (sak.error || '未知'))),
+            sak.matches && sak.matches.length ? sak.matches.map(function (m, i) {
+              return h('div', { className: 'dm-public-row', key: i }, h('span', { className: 'dm-public-k' }, '匹配'), h('span', { className: 'dm-public-v good' }, m.name + ' · ' + m.host + ':' + m.port + (m.up ? ' · 在线' : ' · 离线')))
+            }) : null
+          ) : null
+        ) : null
+      )
+    }
+
+    // 2026-11-11：权限设置（节点 ACL；允许/禁止对端调用本机工具）
+    function PermissionsPanel(props) {
+      var ts = useState(null); var tools = ts[0]; var setTools = ts[1]
+      var bs = useState(false); var busy = bs[0]; var setBusy = bs[1]
+      var ms = useState(''); var msg = ms[0]; var setMsg = ms[1]
+      var qs = useState(''); var query = qs[0]; var setQuery = qs[1]
+      function load() {
+        setBusy(true); setMsg('')
+        jsonFetch('/api/dsh-mesh/permissions').then(function (j) {
+          if (j.ok) setTools(j.tools || []); else setMsg(j.error || '读取权限失败')
+        }).catch(function (e) { setMsg(String(e.message || e)) }).finally(function () { setBusy(false) })
+      }
+      useEffect(function () { load() }, [])
+      function toggle(tool) {
+        var next = !tool.allowed
+        setBusy(true); setMsg('')
+        jsonFetch('/api/dsh-mesh/permissions/set', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: tool.name, allowed: next }) })
+          .then(function (j) {
+            if (j.ok) { setTools(function (prev) { return (prev || []).map(function (x) { return x.name === tool.name ? Object.assign({}, x, { allowed: next }) : x }) }); setMsg((next ? '已允许 ' : '已禁止 ') + tool.name) }
+            else setMsg(String(j.error || j.stderr || '更新失败').slice(0, 300))
+          }).catch(function (e) { setMsg(String(e.message || e)) }).finally(function () { setBusy(false) })
+      }
+      var filtered = (tools || []).filter(function (t) { return !query || (t.name + ' ' + t.description).toLowerCase().indexOf(query.toLowerCase()) >= 0 })
+      return h('div', { className: 'dm-perm' },
+        h('div', { className: 'dm-sub' }, '控制对端可以通过 AI 网络调用本机的哪些工具。禁止后对端立即失去权限；这只改本机 ACL，不会同步到其他设备。'),
+        h('div', { className: 'dm-lan-row' },
+          h('button', { className: 'dm-btn', disabled: busy, onClick: load }, busy ? '读取中…' : '刷新'),
+          h('input', { className: 'dm-perm-search', type: 'text', placeholder: '搜索工具名/说明', value: query, onChange: function (e) { setQuery(e.target.value) } }),
+          h('span', { className: 'dm-sub' }, (tools || []).length + ' 个工具')
+        ),
+        msg ? h('div', { className: 'dm-sub dm-public-msg' }, msg) : null,
+        tools === null ? h('div', { className: 'dm-sub' }, '加载中…') : h('div', { className: 'dm-perm-list' },
+          filtered.map(function (t) {
+            return h('label', { className: 'dm-perm-row', key: t.name },
+              h('input', { type: 'checkbox', checked: t.allowed, disabled: busy, onChange: function () { toggle(t) } }),
+              h('span', { className: 'dm-perm-name' }, t.name),
+              h('span', { className: 'dm-perm-desc' }, t.description),
+              h('span', { className: 'dm-chip ' + (t.allowed ? 'ok' : 'muted') }, t.allowed ? '允许' : '禁止')
+            )
+          })
+        )
+      )
+    }
+
+    // 2026-11-11：面板管理（用户决定右侧显示哪些面板）
+    function PanelManager(props) {
+      return h('div', { className: 'dm-panels' },
+        h('div', { className: 'dm-sub' }, '勾选要显示的面板；设置会保存在本机。'),
+        props.items.map(function (item) {
+          return h('label', { className: 'dm-panel-toggle', key: item.id },
+            h('input', { type: 'checkbox', checked: !props.hidden[item.id], onChange: function () { props.onToggle(item.id) } }),
+            h('span', null, item.label)
+          )
+        })
+      )
+    }
+
+    // 2026-11-11：AI 网络使用说明（用户视角，纯文本）
+    function UsageHelpV2(props) {
+      return h('div', { className: 'dm-usage' },
+        h('p', null, '这个页面显示当前 AI 网络里有哪些设备、它们是否在线，以及各条链路的状态。'),
+        h('p', null, '局域网连接：先扫描，确认对方是你认识的设备，再输入对方生成的一次性配对码。扫描本身不会自动连接。'),
+        h('p', null, '公网连接：如果对方有公网 IP 或端口映射，直接填地址和端口检测；如果走樱花穿透，切到樱花模式自动检测隧道。'),
+        h('p', null, '节点管理和权限设置只影响本机；多设备同步目前还没有做，移除节点后不会自动通知其他设备。'),
+        h('p', null, '拓扑图和设备卡片用来查看状态；右侧面板可以按需展开或隐藏，不影响真实链路。')
       )
     }
 
@@ -2026,15 +2184,19 @@ function deviceLinkState(data, peer, lanMap) {
         ),
         msg ? h('div', { className: 'dm-sub', style: { marginTop: 6 } }, msg) : null,
         mine ? h('div', { className: 'dm-lan-code', style: { marginTop: 8 } }, '配对码 ' + mine.pairingCode + ' · ' + (mine.endpoint || '') + (mine.certFingerprint ? ' · 指纹 ' + mine.certFingerprint : '')) : null,
-        nodes && nodes.length ? h('div', { style: { marginTop: 8 } },
-          nodes.map(function (node, i) {
-            return h('div', { className: 'dm-lan-node', key: i },
-              h('span', { className: 'dm-dot ' + (statuses[i] === 'ok' ? 'ok' : statuses[i] === 'bad' ? 'bad' : 'muted'), title: statuses[i] === 'ok' ? '链路可达' : statuses[i] === 'bad' ? '链路不可达' : '检查中' }),
-              h('span', null, (node.node || '?') + ' · ' + (node.url || '').replace('/mcp', '')),
-              h('button', { className: 'dm-btn', disabled: busy, onClick: function () { checkNode(node) } }, '检查链路'),
-              h('button', { className: 'dm-btn primary', disabled: busy || !String(code || '').trim(), onClick: function () { pairWith(node) } }, '用此节点配对')
+        nodes && nodes.length ? h('table', { className: 'dm-lan-table' },
+          h('thead', null, h('tr', null, h('th', null, '状态'), h('th', null, '节点'), h('th', null, '地址'), h('th', null, '操作'))),
+          h('tbody', null, nodes.map(function (node, i) {
+            return h('tr', { key: i },
+              h('td', null, h('span', { className: 'dm-dot ' + (statuses[i] === 'ok' ? 'ok' : statuses[i] === 'bad' ? 'bad' : 'muted'), title: statuses[i] === 'ok' ? '链路可达' : statuses[i] === 'bad' ? '链路不可达' : '检查中' })),
+              h('td', { title: String(node.node || '?') }, node.node || '?'),
+              h('td', { className: 'dm-mono', title: String(node.url || '') }, String(node.url || '').replace('/mcp', '')),
+              h('td', { className: 'dm-lan-actions' },
+                h('button', { className: 'dm-btn', disabled: busy, onClick: function () { checkNode(node) } }, '检查链路'),
+                h('button', { className: 'dm-btn primary', disabled: busy || !String(code || '').trim(), onClick: function () { pairWith(node) } }, '用此节点配对')
+              )
             )
-          })
+          }))
         ) : null,
         nodes && nodes.length ? h('div', { className: 'dm-lan-row' },
           h('input', { placeholder: '对方显示的配对码，如 H5K4-9RXV', value: code, onChange: function (e) { setCode(e.target.value) } })
@@ -2054,6 +2216,24 @@ function deviceLinkState(data, peer, lanMap) {
       var s6 = useState(""); var refreshHint = s6[0]; var setRefreshHint = s6[1]
       var forceRef = useRef({ at: 0, busy: false })
       var s5 = useState('local'); var selectedKey = s5[0]; var setSelectedKey = s5[1]
+      var panelState = useState(function () {
+        try { return JSON.parse(window.localStorage.getItem('dsh-mesh-ui.panels.v1') || '{}') || {} } catch (error) { return {} }
+      })
+      var hiddenPanels = panelState[0]; var setHiddenPanels = panelState[1]
+      var PANEL_ITEMS = [
+        ['usage', '使用说明'], ['lan', '局域网连接'], ['public', '公网连接'],
+        ['nodes', '节点管理'], ['permissions', '权限设置'], ['transfers', '文件传输'],
+        ['instances', '本机实例'], ['versions', '版本一致性'], ['delegations', '委托台账'],
+        ['alerts', '告警历史'], ['diagnostics', '诊断建议']
+      ]
+      function togglePanel(id) {
+        setHiddenPanels(function (prev) {
+          var next = Object.assign({}, prev);
+          next[id] = !next[id];
+          try { window.localStorage.setItem('dsh-mesh-ui.panels.v1', JSON.stringify(next)) } catch (error) { /* ignore */ }
+          return next
+        })
+      }
       var sHelp = useState(false); var helpOpen = sHelp[0]; var setHelpOpen = sHelp[1]
       var sPublic = useState(function () {
         try { return window.localStorage.getItem('dsh-mesh.show-public-addresses') === '1' } catch (error) { return false }
@@ -2198,13 +2378,11 @@ function deviceLinkState(data, peer, lanMap) {
           ),
           h('a', { className: 'dm-btn', href: API, target: '_blank', rel: 'noreferrer', style: { textDecoration: 'none' } }, '原始 JSON'),
           h('button', { className: 'dm-btn', onClick: copyJson }, copied || '复制诊断'),
-          h('button', { className: 'dm-btn', onClick: function () { setHelpOpen(true) } }, '使用说明'),
           h('button', { className: 'dm-btn primary', onClick: function () { load(true) }, title: '立即采集一次并等待新快照（8s 冷却）' }, loading ? '采集中…' : '刷新'),
           refreshHint ? h('span', { className: 'dm-sub' }, refreshHint) : null
         ),
         error ? h('div', { className: 'dm-err' }, error) : null,
 
-        helpOpen ? h(HelpSheet, { onClose: function () { setHelpOpen(false) } }) : null,
 
         h('div', { className: 'dm-body', style: splitW > 0 ? { '--dm-main-w': splitW + 'px' } : undefined },
           h('div', { className: 'dm-pane' },
@@ -2214,20 +2392,22 @@ function deviceLinkState(data, peer, lanMap) {
           ),
           h('div', { className: 'dm-divider', onPointerDown: startSplit, title: '↔ 拖拽调整左右宽度（双击恢复默认）', onDoubleClick: function () { setSplitW(0); try { window.localStorage.removeItem('dsh-mesh-split-w') } catch (error) { /* ignore */ } } }),
           h('div', { className: 'dm-pane' },
-            h(Details, { title: '使用说明', badge: 'AI 能做什么', open: true }, h(UsageHelp, { onOpen: function () { setHelpOpen(true) } })),
-            h(Details, { title: '局域网连接', badge: '扫描 / 配对' }, h(LanOnboarding, { onChanged: function () { load(true) } })),
-        h(Details, { title: '公网服务器', badge: 'IP / 樱花检测' }, h(PublicProbe, { data: data })),
-            h(Details, { title: '节点管理', badge: '移除 / 吊销' }, h(NodeManager, { onChanged: function () { load(true) } })),
-            h(Details, { title: '文件传输', badge: '历史' }, h(TransferHistory)),
-            h(Details, { title: '本机实例', badge: ((data.local && data.local.instances) || []).length, open: true }, h(InstanceList, { data: data })),
-            h(Details, { title: '版本一致性', badge: versions.length ? versions.length + ' 处升级' : '一致' },
+            h(Details, { title: '面板管理', badge: '显示 / 隐藏' }, h(PanelManager, { items: PANEL_ITEMS, hidden: hiddenPanels, onToggle: togglePanel })),
+            !hiddenPanels.usage ? h(Details, { title: '使用说明' }, h(UsageHelpV2)) : null,
+            !hiddenPanels.lan ? h(Details, { title: '局域网连接', badge: '扫描 / 配对' }, h(LanOnboarding, { onChanged: function () { load(true) } })) : null,
+            !hiddenPanels.public ? h(Details, { title: '公网连接', badge: '直连 / 樱花' }, h(PublicConnection, { data: data })) : null,
+            !hiddenPanels.nodes ? h(Details, { title: '节点管理', badge: '仅本机生效' }, h(NodeManager, { onChanged: function () { load(true) } })) : null,
+            !hiddenPanels.permissions ? h(Details, { title: '权限设置', badge: '本机 ACL' }, h(PermissionsPanel)) : null,
+            !hiddenPanels.transfers ? h(Details, { title: '文件传输', badge: '历史' }, h(TransferHistory)) : null,
+            !hiddenPanels.instances ? h(Details, { title: '本机实例', badge: ((data.local && data.local.instances) || []).length }, h(InstanceList, { data: data })) : null,
+            !hiddenPanels.versions ? h(Details, { title: '版本一致性', badge: versions.length ? versions.length + ' 处升级' : '一致' },
               versions.length
                 ? versions.map(function (item, i) { return h('div', { key: i, className: 'dm-sub', style: { marginTop: 4 } }, '· ' + (typeof item === 'string' ? item : JSON.stringify(item))) })
                 : h('div', { className: 'dm-empty' }, '所有节点/实例版本一致')
-            ),
-            h(Details, { title: '委托台账', badge: (data.delegations && data.delegations.total) || 0 }, h(DelegationTable, { data: data })),
-            h(Details, { title: '告警历史', badge: ((data.alerts && data.alerts.history) || []).length }, h(AlertList, { data: data })),
-            (issues.length || hints.length) ? h(Details, { title: '诊断建议', badge: issues.length + hints.length },
+            ) : null,
+            !hiddenPanels.delegations ? h(Details, { title: '委托台账', badge: (data.delegations && data.delegations.total) || 0 }, h(DelegationTable, { data: data })) : null,
+            !hiddenPanels.alerts ? h(Details, { title: '告警历史', badge: ((data.alerts && data.alerts.history) || []).length }, h(AlertList, { data: data })) : null,
+            !hiddenPanels.diagnostics && (issues.length || hints.length) ? h(Details, { title: '诊断建议', badge: issues.length + hints.length },
               h('div', null,
                 issues.slice(0, 6).map(function (issue, i) { return h('div', { key: 'i' + i, className: 'dm-err', style: { marginTop: 3 } }, '· ' + maskText(issue)) }),
                 hints.slice(0, 6).map(function (hint, i) { return h('div', { key: 'h' + i, className: 'dm-sub', style: { marginTop: 3 } }, '· ' + maskText(hint)) })
@@ -2956,6 +3136,39 @@ body[data-ds-dark-theme] .dm-dg-fs-item.active { background:rgba(88,166,255,.28)
 .dm-public-v.muted { opacity:.6; }
 .dm-public-msg { margin-top:6px; color:#c9362c; }
 .dm-public-sakura { margin-top:7px; padding-top:6px; border-top:1px dashed rgba(128,128,128,.2); }
+.dm-content, .dm-content > .dm-root { height:100%; min-height:0; }
+.dm-root { display:flex; flex-direction:column; min-height:0; }
+.dm-head, .dm-foot { flex:none; }
+.dm-body { flex:1; min-height:0; align-items:stretch; }
+.dm-content-scroll { overflow:hidden; }
+.dm-pane { min-height:0; overflow:auto; padding-right:4px; }
+.dm-pub-tabs { display:flex; gap:5px; margin-bottom:7px; }
+.dm-pub-tab { font-size:11.5px; padding:4px 11px; border-radius:7px; border:1px solid rgba(128,128,128,.32); background:transparent; color:inherit; cursor:pointer; }
+.dm-pub-tab.active { border-color:rgba(88,166,255,.65); color:#3b82d6; background:rgba(88,166,255,.1); }
+.dm-lan-table { width:100%; table-layout:fixed; border-collapse:collapse; font-size:11.5px; margin-top:6px; }
+.dm-lan-table th { text-align:left; font-weight:600; font-size:10.5px; opacity:.55; padding:4px 6px; border-bottom:1px solid rgba(128,128,128,.22); white-space:nowrap; }
+.dm-lan-table td { padding:5px 6px; border-bottom:1px solid rgba(128,128,128,.12); vertical-align:middle; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.dm-lan-table th:nth-child(1), .dm-lan-table td:nth-child(1) { width:38px; }
+.dm-lan-table th:nth-child(2), .dm-lan-table td:nth-child(2) { width:23%; }
+.dm-lan-table th:nth-child(4), .dm-lan-table td:nth-child(4) { width:150px; }
+.dm-lan-table.dm-sakura-table th:nth-child(2), .dm-lan-table.dm-sakura-table td:nth-child(2) { width:38%; }
+.dm-lan-table.dm-sakura-table th:nth-child(4), .dm-lan-table.dm-sakura-table td:nth-child(4) { width:70px; }
+.dm-lan-actions { display:flex; gap:5px; justify-content:flex-end; align-items:center; }
+.dm-lan-actions .dm-btn { padding:3px 7px; font-size:10.5px; }
+.dm-perm-search { min-width:140px; flex:1; padding:5px 8px; border-radius:7px; border:1px solid rgba(128,128,128,.35); background:rgba(128,128,128,.08); color:inherit; font-size:12px; outline:none; }
+.dm-perm-list { margin-top:7px; border-top:1px solid rgba(128,128,128,.18); }
+.dm-perm-row { display:grid; grid-template-columns:18px minmax(130px, 23%) minmax(0,1fr) 52px; gap:7px; align-items:center; padding:5px 2px; border-bottom:1px solid rgba(128,128,128,.12); font-size:11.5px; cursor:pointer; }
+.dm-perm-row:hover { background:rgba(128,128,128,.08); }
+.dm-perm-name { font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:11px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.dm-perm-desc { opacity:.65; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.dm-panels { display:flex; flex-direction:column; gap:4px; }
+.dm-panel-toggle { display:flex; gap:6px; align-items:center; font-size:12px; padding:3px 0; cursor:pointer; }
+@container dm-content (max-width: 860px) {
+  .dm-content-scroll { overflow:auto; }
+  .dm-content, .dm-content > .dm-root { height:auto; }
+  .dm-body { display:block; flex:none; }
+  .dm-pane { overflow:visible; padding-right:0; }
+}
 .dm-lan-row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-top:8px; }
 .dm-lan input { font:inherit; font-size:12px; padding:5px 8px; border:1px solid rgba(128,128,128,.35); border-radius:7px; background:transparent; color:inherit; min-width:180px; }
 .dm-lan-node { display:flex; gap:8px; align-items:center; border-top:1px solid rgba(128,128,128,.16); padding:7px 0; font-size:12px; }
@@ -2989,6 +3202,19 @@ body[data-ds-dark-theme] .dm-dg-fs-item.active { background:rgba(88,166,255,.28)
 .dm-divider::before { content:''; position:absolute; top:0; bottom:0; left:3px; width:1px; background:rgba(128,128,128,.28); }
 .dm-divider:hover::before, .dm-divider:active::before { background:rgba(88,166,255,.7); width:2px; left:2.5px; }
 @container dm-content (max-width: 860px) { .dm-body { grid-template-columns:1fr; } .dm-divider { display:none; } }
+/* 2026-11-11 布局：宽屏左右各自滚动；窄屏恢复整页单列滚动 */
+.dm-content-shell .dm-content-scroll { overflow:hidden; }
+.dm-content > .dm-root { height:100%; min-height:0; }
+.dm-root { display:flex; flex-direction:column; min-height:0; }
+.dm-head, .dm-foot { flex:none; }
+.dm-body { flex:1; min-height:0; align-items:stretch; }
+.dm-pane { min-height:0; overflow:auto; padding-right:4px; }
+@container dm-content (max-width: 860px) {
+  .dm-content-shell .dm-content-scroll { overflow:auto; }
+  .dm-content > .dm-root { height:auto; }
+  .dm-body { display:block; flex:none; }
+  .dm-pane { overflow:visible; padding-right:0; }
+}
 `
     function MeshNetworkPage() {
       // 宽度偏好：与 DSH 对话区相同语义——空 = 默认宽度，数字 = 用户拖拽固定值。

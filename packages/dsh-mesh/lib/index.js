@@ -277,6 +277,32 @@ export function apply(ctx) {
     }
   }
 
+  const permissionsRoute = readonlyRoute('/api/dsh-mesh/permissions', async () => {
+    const r = await runCli(['tools', '--all'], 30_000)
+    if (r.error) return { ok: false, error: r.error, stderr: r.stderr }
+    const tools = []
+    for (const line of String(r.stdout || '').split(/\r?\n/)) {
+      const match = /^\s*(ALLOW|deny)\s+([a-z0-9_]+)\s+(.*)$/i.exec(line)
+      if (!match) continue
+      tools.push({ name: match[2], allowed: match[1].toUpperCase() === 'ALLOW', description: match[3].trim() })
+    }
+    return { ok: true, tools }
+  })
+
+  const permissionsSetRoute = {
+    kind: 'exact',
+    path: '/api/dsh-mesh/permissions/set',
+    handler: async (req, res) => {
+      if (!isLoopback(req)) return writeJson(res, 403, { ok: false, error: 'forbidden: loopback-only' })
+      if ((req.method || 'GET').toUpperCase() !== 'POST') return writeJson(res, 405, { ok: false, error: 'method not allowed' })
+      const body = await readBody(req)
+      const name = String(body?.name || '').trim()
+      if (!/^[a-z0-9_]+$/i.test(name)) return writeJson(res, 400, { ok: false, error: 'invalid tool name' })
+      const r = await runCli(['acl', body?.allowed ? 'allow' : 'deny', name], 30_000)
+      writeJson(res, 200, { ok: !r.error, name, allowed: body?.allowed === true, error: r.error, stdout: r.stdout, stderr: r.stderr })
+    }
+  }
+
   const lanPairRoute = {
     kind: 'exact',
     path: '/api/dsh-mesh/lan/pair',
@@ -428,7 +454,7 @@ export function apply(ctx) {
 
   ctx.effect(() => {
     const disposeRoute = ctx.webServer.register(route)
-    const disposeLanRoutes = [lanScanRoute, lanCodeRoute, lanCheckRoute, lanPairRoute, publicProbeRoute, federatedRoute, peersListRoute, peersRemoveRoute, peersToggleRoute, tokensListRoute, tokensRevokeRoute, transfersRoute].map((item) => ctx.webServer.register(item))
+    const disposeLanRoutes = [lanScanRoute, lanCodeRoute, lanCheckRoute, lanPairRoute, publicProbeRoute, permissionsRoute, permissionsSetRoute, federatedRoute, peersListRoute, peersRemoveRoute, peersToggleRoute, tokensListRoute, tokensRevokeRoute, transfersRoute].map((item) => ctx.webServer.register(item))
     const disposeRoutes = delegateRoutes.map((item) => ctx.webServer.register(item))
     return () => {
       try {
