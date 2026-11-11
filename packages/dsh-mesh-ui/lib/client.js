@@ -1965,9 +1965,6 @@ function deviceLinkState(data, peer, lanMap) {
       // 2026-11-10：真刷新 —— 点击后等待后台采集完成再渲染；本地冷却 + 忙锁防止连点刷爆请求
       var s6 = useState(""); var refreshHint = s6[0]; var setRefreshHint = s6[1]
       var forceRef = useRef({ at: 0, busy: false })
-      // 2026-11-10：verdict 防抖 —— 单次探测失败（远端忙/超时）只显示 degraded，连续 2 次才显示 down
-      var verdictState = useState(''); var verdictShown = verdictState[0]; var setVerdictShown = verdictState[1]
-      var verdictRef = useRef({ raw: '', streak: 0 })
       var s5 = useState('local'); var selectedKey = s5[0]; var setSelectedKey = s5[1]
       var sHelp = useState(false); var helpOpen = sHelp[0]; var setHelpOpen = sHelp[1]
       var sPublic = useState(function () {
@@ -2079,24 +2076,7 @@ function deviceLinkState(data, peer, lanMap) {
         federatedRef.current.at = now
         fetch('/api/dsh-mesh/federated').then(function (r) { return r.text() }).then(function (text) { try { setFederated(JSON.parse(text)) } catch (error) {} }).catch(function () {})
       }, [data])
-      useEffect(function () {
-        var raw = String((data && data.verdict) || '')
-        if (!raw) return
-        var st = verdictRef.current
-        var at = String((data && data.at) || '')
-        var fresh = Boolean(at) && at !== st.lastAt
-        if (raw === 'down') {
-          if (fresh && !st.downAt) st.downAt = Date.now()
-          st.lastAt = at
-          var persisted = Boolean(st.downAt) && Date.now() - st.downAt >= 15000
-          setVerdictShown(persisted ? 'down' : 'degraded')
-        } else {
-          st.downAt = 0
-          st.lastAt = at
-          setVerdictShown(raw)
-        }
-        st.raw = raw
-      }, [data])
+
 
       function copyJson() {
         var text = JSON.stringify(data || {}, null, 2)
@@ -2122,11 +2102,6 @@ function deviceLinkState(data, peer, lanMap) {
         h('style', null, CSS),
         h('div', { className: 'dm-head' },
           h('span', { className: 'dm-title' }, 'AI 网络 · dsh-mesh'),
-          h('span', {
-            className: 'dm-pill ' + (data.warming ? 'muted' : tone(verdictShown || data.verdict)),
-            title: data.warming ? '' : (verdictShown === 'degraded' ? '探测波动：需持续 ≥15s 且新快照仍 down 才显示 down' : ''),
-            style: verdictShown === 'degraded' ? { opacity: 0.75 } : undefined
-          }, data.warming ? '预热中' : (verdictShown || data.verdict || '?')),
           h('span', { className: 'dm-sub' }, (data.meshVersion ? 'mesh ' + data.meshVersion + ' · ' : '') + (data.at ? ago(data.at) : '')),
           h('span', { style: { flex: 1 } }),
           h('label', { className: 'dm-toggle', title: '默认隐藏公网 IP/域名；勾选后显示真实地址并记住选择' },
