@@ -1,5 +1,5 @@
 {
-  "name": "dsh-mesh",
+  "name": "@linyanzhi/dsh-mesh",
   "version": "0.1.0",
   "description": "One-command install for dsh-mesh: AI network node, DSH host bridge, sidebar UI and autostart supervisor in a single DSH plugin bundle.",
   "type": "module",

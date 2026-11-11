@@ -1,9 +1,9 @@
-# dsh-mesh
+# @linyanzhi/dsh-mesh
 
 One-command install for the dsh-mesh AI network.
 
 ```sh
-dsh plugin --profile web add dsh-mesh
+dsh plugin --profile web add @linyanzhi/dsh-mesh
 ```
 
 This bundle installs and wires:
