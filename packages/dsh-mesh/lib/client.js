@@ -464,6 +464,7 @@ body.light .dm-edge-label { stroke: rgba(255,255,255,.92); }
     // 2026-11-10：当前筛选下可见的服务器数量（0/1/2），用于拓扑布局
     var SELECTED_SAKURA_KEY = 'dsh-mesh-ui.sakuraServer.v1'
     var SELECTED_PUBLIC_KEY = 'dsh-mesh-ui.publicServer.v1'
+    var SELECTED_SAKURA_SERVERS_KEY = 'dsh-mesh-ui.sakuraServers.v2'
     function readSelectedServer(key) {
       try { return JSON.parse(window.localStorage.getItem(key) || 'null') } catch (e) { return null }
     }
@@ -477,6 +478,39 @@ body.light .dm-edge-label { stroke: rgba(255,255,255,.92); }
     function setSelectedSakuraServer(value) { writeSelectedServer(SELECTED_SAKURA_KEY, value) }
     function selectedPublicServer() { return readSelectedServer(SELECTED_PUBLIC_KEY) }
     function setSelectedPublicServer(value) { writeSelectedServer(SELECTED_PUBLIC_KEY, value) }
+    function selectedSakuraServers() {
+      try {
+        var list = JSON.parse(window.localStorage.getItem(SELECTED_SAKURA_SERVERS_KEY) || '[]')
+        return Array.isArray(list) ? list : []
+      } catch (e) { return [] }
+    }
+    function setSelectedSakuraServers(list) {
+      try {
+        if (list && list.length) window.localStorage.setItem(SELECTED_SAKURA_SERVERS_KEY, JSON.stringify(list))
+        else window.localStorage.removeItem(SELECTED_SAKURA_SERVERS_KEY)
+      } catch (e) { /* ignore */ }
+    }
+    function sakuraServerGroups(account) {
+      var groups = []
+      var map = {}
+      ;((account && account.tunnels) || []).forEach(function (t) {
+        var key = String(t.nodeId || t.nodeName || t.host || 'unknown')
+        if (!map[key]) {
+          map[key] = { key: key, nodeId: t.nodeId || null, name: t.nodeName || t.host || 'Sakura 服务器', host: t.host || '', mesh: [], other: [] }
+          groups.push(map[key])
+        }
+        var g = map[key]
+        var lp = Number(t.localPort) || null
+        var mesh = lp === 8124 || lp === 8126 || /(dsh|mesh)/i.test(String(t.name || '') + ' ' + String(t.note || ''))
+        g[mesh ? 'mesh' : 'other'].push(t)
+      })
+      groups.forEach(function (g) {
+        g.online = g.mesh.some(function (t) { return t.online !== false }) || (g.other || []).some(function (t) { return t.online === true })
+        g.meshCount = g.mesh.length
+        g.otherCount = g.other.length
+      })
+      return groups
+    }
 
     function visibleServerCount(data, show) {
       var s = show || { lan: true, public: true, sakura: true }
@@ -484,7 +518,7 @@ body.light .dm-edge-label { stroke: rgba(255,255,255,.92); }
       var peers = filterSelfPeers(dedupePeers(d.peers || []), d.nodeName)
       var hasPublic = Boolean(publicEntryFor(d.localTunnel || {})) || Boolean(selectedPublicServer()) || peers.some(function (p) { var pt = p.tunnel || {}; return !isLanPeer(p) && Boolean(pt.host) && (pt.kind === 'frp' || pt.kind === 'wan') })
       var acc = sakuraAccountOf(d)
-      var hasSakura = Boolean(acc && ((acc.tunnels || []).length || acc.error)) || Boolean(selectedSakuraServer())
+      var hasSakura = Boolean(acc && ((acc.tunnels || []).length || acc.error)) || selectedSakuraServers().length > 0
       return (s.public && hasPublic ? 1 : 0) + (s.sakura && hasSakura ? 1 : 0)
     }
 
@@ -1291,7 +1325,14 @@ function deviceLinkState(data, peer, lanMap) {
   var hasPublic = Boolean(localPub) || Boolean(selectedPublic) || peers.some(function (p) { var pt = p.tunnel || {}; return !isLanPeer(p) && Boolean(pt.host) && (pt.kind === 'frp' || pt.kind === 'wan') })
   var publicVisible = show.public && hasPublic
   var sakuraRaw = sakuraAccountOf(data)
-  var selectedSakura = selectedSakuraServer()
+  var selectedSakuraList = selectedSakuraServers()
+  var selectedMeshTotal = selectedSakuraList.reduce(function (n, s) { return n + ((s.mesh || []).length) }, 0)
+  var selectedSakura = selectedSakuraList.length ? {
+    name: 'Sakura 穿透 · ' + selectedSakuraList.length + ' 台服务器',
+    host: selectedSakuraList[0].host || '',
+    note: selectedMeshTotal + ' 条 mesh 隧道',
+    up: selectedSakuraList.some(function (s) { return s.online !== false })
+  } : null
   var sakuraAcc = sakuraRaw ? Object.assign({}, sakuraRaw, { tunnels: (sakuraRaw.tunnels || []).filter(tunnelMatchesNode(localTunnel.port)) }) : null
   var sakuraVisible = show.sakura && Boolean(selectedSakura || (sakuraAcc && ((sakuraAcc.tunnels || []).length || sakuraAcc.error)))
   var aliyunPorts = peers.map(function (p) { return isLanPeer(p) ? null : (p.tunnel || {}).port }).filter(Boolean)
@@ -1406,8 +1447,9 @@ function deviceLinkState(data, peer, lanMap) {
   if (sakuraVisible) infraBoxes.push({ x: sakuraPos[0], y: sakuraPos[1], w: sakuraSize.w, h: sakuraSize.h })
   if (props.onInfraBounds) props.onInfraBounds(infraBoxes)
   var localKey = peerDeviceKey(data.nodeName)
+  var firstMeshTunnel = selectedSakuraList.length && selectedSakuraList[0].mesh && selectedSakuraList[0].mesh[0] ? selectedSakuraList[0].mesh[0] : null
   var localSak = selectedSakura
-    ? { addr: selectedSakura.host + (selectedSakura.port ? ':' + selectedSakura.port : ''), online: selectedSakura.up !== false, name: selectedSakura.name || 'Sakura 服务器' }
+    ? { addr: firstMeshTunnel ? (firstMeshTunnel.host + ':' + firstMeshTunnel.remotePort) : (selectedSakura.host || 'Sakura'), online: selectedSakura.up !== false, name: selectedSakura.name }
     : sakuraTunnelOf(data, localKey)
   // 2026-11-10：LAN 线必须从本机节点出发（排序后 local 可能不在 index 0，之前误连到peer-x）
   var localNodeIdx = 0
@@ -1943,6 +1985,7 @@ function deviceLinkState(data, peer, lanMap) {
       var msgs = useState(''); var msg = msgs[0]; var setMsg = msgs[1]
       var ss = useState(selectedSakuraServer()); var selectedServer = ss[0]; var setSelectedServer = ss[1]
       var pss = useState(selectedPublicServer()); var selectedPublic = pss[0]; var setSelectedPublic = pss[1]
+      var sgs = useState(selectedSakuraServers()); var selectedGroups = sgs[0]; var setSelectedGroups = sgs[1]
 
       var tunnels = (props.data && props.data.tunnels) || {}
       var meshPort = Number((props.data && props.data.endpoint && props.data.endpoint.port) || (props.data && props.data.localTunnel && props.data.localTunnel.port) || 8124)
@@ -1967,6 +2010,38 @@ function deviceLinkState(data, peer, lanMap) {
         else if (t.addr) { var m = /^([^:]+):(\d+)$/.exec(String(t.addr)); if (m) addEndpoint(t.name, m[1], m[2], t.online === true, t.note, t.localPort) }
       })
       ;(tunnels.sakura && tunnels.sakura.tunnels || []).forEach(function (t) { addEndpoint(t.name, t.host, t.port, t.probe && t.probe.up, t.note, t.localPort) })
+      var sakuraServers = sakuraServerGroups(tunnels.sakuraAccount)
+      function isGroupSelected(group) { return (selectedGroups || []).some(function (g) { return String(g.key) === String(group.key) }) }
+      function toggleGroup(group) {
+        var was = isGroupSelected(group)
+        var next = (selectedGroups || []).filter(function (g) { return String(g.key) !== String(group.key) })
+        if (!was) next = next.concat([{ key: group.key, name: group.name, host: group.host, online: group.online, mesh: group.mesh, other: group.other, meshCount: group.meshCount, otherCount: group.otherCount }])
+        setSelectedGroups(next)
+        setSelectedSakuraServers(next)
+        setMsg(was ? '已从拓扑移出服务器：' + group.name : '已加入拓扑服务器：' + group.name + '（' + group.meshCount + ' 条 mesh 隧道）')
+        if (props.onChanged) props.onChanged()
+      }
+      function tunnelAddr(t) { return String(t.host || '') + ':' + String(t.remotePort || t.port || '') }
+      function isTunnelVerified(t) {
+        var addr = tunnelAddr(t)
+        return ((props.data && props.data.peers) || []).some(function (p) {
+          var u = String(p.url || '')
+          var m = /^[a-z]+:\/\/([^/:]+):(\d+)/i.exec(u)
+          if (m && (m[1] + ':' + m[2]) === addr) return true
+          var pt = p.tunnel || {}
+          return pt.host === t.host && String(pt.port) === String(t.remotePort || t.port || '')
+        })
+      }
+      function verifyTunnel(t) {
+        var code = window.prompt('验证 mesh 节点「' + (t.name || tunnelAddr(t)) + '」\n请输入对方生成的一次性配对码：', '')
+        if (!code) return
+        setBusy(true); setMsg('')
+        jsonFetch('/api/dsh-mesh/lan/pair', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ url: 'https://' + tunnelAddr(t), code: String(code).trim(), name: t.note || t.name || t.host, fingerprint: '' }) })
+          .then(function (j) {
+            if (j.ok) { setMsg('已验证并加入节点：' + (t.name || tunnelAddr(t))); if (props.onChanged) props.onChanged() }
+            else setMsg(String(j.stderr || j.error || j.stdout || '验证失败').slice(0, 300))
+          }).catch(function (e) { setMsg(String(e.message || e)) }).finally(function () { setBusy(false) })
+      }
 
       function persist(nextMode, nextHost, nextPort) {
         try { window.localStorage.setItem('dsh-mesh-ui.publicConnection.v2', JSON.stringify({ mode: nextMode, host: nextHost, port: nextPort })) } catch (_) {}
@@ -2019,11 +2094,31 @@ function deviceLinkState(data, peer, lanMap) {
         setMsg(next ? '已加入拓扑服务器：' + (next.note || next.name) : '已从拓扑移出服务器')
         if (props.onChanged) props.onChanged()
       }
+      function resultSakuraGroup() {
+        if (!result) return null
+        var addr = String(result.host || '') + ':' + String(result.port || '')
+        for (var i = 0; i < sakuraServers.length; i++) {
+          var g = sakuraServers[i]
+          for (var j = 0; j < (g.mesh || []).length; j++) {
+            var t = g.mesh[j]
+            if (String(t.addr || (t.host + ':' + t.remotePort)) === addr) return g
+          }
+        }
+        return null
+      }
+      function isResultServerSelected() {
+        if (mode === 'sakura') { var g = resultSakuraGroup(); return Boolean(g && isGroupSelected(g)) }
+        return isPublicSelected(result)
+      }
       function toggleResultServer() {
         if (!result || !result.compatible || !result.host) { setMsg('协议检测通过后才能加入拓扑'); return }
-        var server = { name: (proto && proto.node) || result.host, note: result.sakura && result.sakura.matches && result.sakura.matches[0] ? (result.sakura.matches[0].note || result.sakura.matches[0].name) : '', host: result.host, port: result.port, up: true }
-        if (mode === 'sakura') toggleServer(server)
-        else togglePublicServer(server)
+        if (mode === 'sakura') {
+          var g = resultSakuraGroup()
+          if (!g) { setMsg('这条隧道没有匹配到 Sakura 服务器分组'); return }
+          toggleGroup(g)
+          return
+        }
+        togglePublicServer({ name: (proto && proto.node) || result.host, note: result.sakura && result.sakura.matches && result.sakura.matches[0] ? (result.sakura.matches[0].note || result.sakura.matches[0].name) : '', host: result.host, port: result.port, up: true })
       }
       function row(k, v, tone) {
         if (v == null || v === '') return null
@@ -2078,7 +2173,41 @@ function deviceLinkState(data, peer, lanMap) {
             )
           )
           : h('div', null,
-            h('div', { className: 'dm-sub' }, '自动读取本机樱花隧道入口，并检测它是否能响应 dsh-mesh 协议。'),
+            h('div', { className: 'dm-sub' }, 'Sakura 是软件，下面是它提供的公网服务器；只有本地端口指向 mesh 的隧道才会进入网络，其他隧道只做详情。'),
+            sakuraServers.length ? h('div', { className: 'dm-sakura-servers' }, sakuraServers.map(function (g) {
+              var selected = isGroupSelected(g)
+              return h('div', { className: 'dm-sakura-server' + (selected ? ' selected' : ''), key: g.key },
+                h('div', { className: 'dm-sakura-server-head' },
+                  h('span', { className: 'dm-dot ' + (g.online ? 'ok' : 'muted') }),
+                  h('span', { className: 'dm-sakura-server-name' }, g.name),
+                  h('span', { className: 'dm-sub dm-mono' }, g.host || '—'),
+                  h('span', { className: 'dm-sub' }, g.meshCount + ' mesh / ' + g.otherCount + ' 其他'),
+                  h('button', { className: 'dm-btn' + (selected ? ' bad' : ''), disabled: busy, onClick: function () { toggleGroup(g) } }, selected ? '移出拓扑' : '加入拓扑')
+                ),
+                g.mesh.length ? h('div', { className: 'dm-sakura-server-mesh' },
+                  g.mesh.map(function (t, i) {
+                    var verified = isTunnelVerified(t)
+                    return h('div', { className: 'dm-sakura-tunnel' + ((!selected || !verified) ? ' pending' : ''), key: 'm' + i },
+                      h('span', { className: 'dm-dot ' + (verified ? 'ok' : 'muted') }),
+                      h('span', { className: 'dm-sakura-tunnel-name' }, t.name || 'mesh'),
+                      h('span', { className: 'dm-sub dm-mono' }, (t.addr || (t.host + ':' + t.remotePort))),
+                      h('span', { className: 'dm-sub' }, t.note || ''),
+                      h('span', { className: 'dm-chip ' + (verified ? 'ok' : 'muted') }, verified ? '已验证' : '待验证'),
+                      !verified ? h('button', { className: 'dm-btn', disabled: busy, onClick: function () { verifyTunnel(t) } }, '验证') : null
+                    )
+                  })
+                ) : null,
+                g.other.length ? h('details', { className: 'dm-sakura-other' },
+                  h('summary', null, '其他隧道 ' + g.other.length + ' 条（仅详情）'),
+                  g.other.map(function (t, i) {
+                    return h('div', { className: 'dm-sakura-tunnel', key: 'o' + i },
+                      h('span', { className: 'dm-sub dm-mono' }, (t.name || '—') + ' · ' + (t.addr || '')),
+                      h('span', { className: 'dm-sub' }, t.note || '')
+                    )
+                  })
+                ) : null
+              )
+            })) : h('div', { className: 'dm-empty' }, '未读取到 Sakura 服务器。'),
             sakuraEndpoints.length
               ? h('table', { className: 'dm-lan-table dm-sakura-table' },
                 h('thead', null, h('tr', null, h('th', null, '隧道'), h('th', null, '备注'), h('th', null, '地址'), h('th', null, '本地端口'), h('th', null, '状态'), h('th', null, '操作'))),
@@ -2090,8 +2219,7 @@ function deviceLinkState(data, peer, lanMap) {
                     h('td', { className: 'dm-mono' }, it.localPort || '—'),
                     h('td', null, h('span', { className: 'dm-chip ' + (it.up ? 'ok' : 'muted') }, it.up ? '在线' : '未探测'), it.mesh === false ? h('span', { className: 'dm-chip bad', style: { marginLeft: 4 } }, '非 mesh') : null),
                     h('td', { className: 'dm-lan-actions' },
-                      h('button', { className: 'dm-btn', disabled: busy, onClick: function () { setHost(it.host); setPort(it.port); persist(mode, it.host, it.port); runProbe(it.host, it.port, true) } }, '检测'),
-                      h('button', { className: 'dm-btn' + (isServerSelected(it) ? ' bad' : ''), disabled: busy || it.mesh === false, title: it.mesh === false ? '非 dsh-mesh 隧道，不能加入拓扑' : '', onClick: function () { toggleServer(it) } }, isServerSelected(it) ? '移出拓扑' : '加入拓扑')
+                      h('button', { className: 'dm-btn', disabled: busy, onClick: function () { setHost(it.host); setPort(it.port); persist(mode, it.host, it.port); runProbe(it.host, it.port, true) } }, '检测')
                     )
                   )
                 }))
@@ -2121,7 +2249,7 @@ function deviceLinkState(data, peer, lanMap) {
             h('div', { className: 'dm-sub' }, '检测通过。这是服务器入口，不是新设备；加入拓扑不需要配对码。'),
             h('div', { className: 'dm-public-form' },
               h('button', { className: 'dm-btn primary', disabled: busy, onClick: toggleResultServer },
-                (mode === 'sakura' ? isServerSelected(result) : isPublicSelected(result)) ? '移出拓扑' : '加入拓扑服务器')
+                isResultServerSelected() ? '移出拓扑' : '加入拓扑服务器')
             )
           ) : null
           ) : null
@@ -3297,6 +3425,17 @@ body[data-ds-dark-theme] .dm-dg-fs-item.active { background:rgba(88,166,255,.28)
 .dm-public-msg { margin-top:6px; color:#c9362c; }
 .dm-public-sakura { margin-top:7px; padding-top:6px; border-top:1px dashed rgba(128,128,128,.2); }
 .dm-join { margin-top:8px; padding-top:8px; border-top:1px dashed rgba(128,128,128,.28); }
+.dm-sakura-servers { display:flex; flex-direction:column; gap:7px; margin-top:7px; }
+.dm-sakura-server { border:1px solid rgba(128,128,128,.25); border-radius:9px; padding:7px 9px; background:rgba(128,128,128,.04); }
+.dm-sakura-server.selected { border-color:rgba(163,113,247,.55); background:rgba(163,113,247,.08); }
+.dm-sakura-server-head { display:flex; align-items:center; gap:7px; flex-wrap:wrap; font-size:12px; }
+.dm-sakura-server-name { font-weight:650; }
+.dm-sakura-server-mesh { margin-top:5px; padding-top:5px; border-top:1px dashed rgba(128,128,128,.2); display:flex; flex-direction:column; gap:4px; }
+.dm-sakura-tunnel { display:flex; align-items:center; gap:6px; flex-wrap:wrap; font-size:11px; }
+.dm-sakura-tunnel.pending { opacity:.55; }
+.dm-sakura-tunnel-name { font-weight:600; }
+.dm-sakura-other { margin-top:5px; font-size:11px; }
+.dm-sakura-other > summary { cursor:pointer; opacity:.6; }
 .dm-content, .dm-content > .dm-root { height:100%; min-height:0; }
 .dm-root { display:flex; flex-direction:column; min-height:0; }
 .dm-head, .dm-foot { flex:none; }
