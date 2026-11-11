@@ -888,7 +888,7 @@ body.light .dm-edge-label { stroke: rgba(255,255,255,.92); }
           h('div', { className: 'dm-world-outer', style: { transform: 'translate(' + view.x + 'px,' + view.y + 'px)' } },
             h('div', { className: 'dm-world', style: Object.assign({ width: effLayout.W + 'px', height: effLayout.H + 'px' },
               SUPPORTS_ZOOM ? { zoom: view.scale } : { transform: 'scale(' + view.scale + ')' }) },
-              h(Topology, { data: props.data, layout: effLayout, selectedKey: props.selectedKey, onSelect: props.onSelect, scale: view.scale, onNodeMove: moveNode, onDragEdge: autoPanAt, onCardSize: onCardSize, show: showFilters, federated: props.federated, onInfraBounds: onInfraBounds, resetNonce: resetNonce, movedLayout: movedLayout })
+              h(Topology, { data: props.data, layout: effLayout, selectedKey: props.selectedKey, onSelect: props.onSelect, scale: view.scale, onNodeMove: moveNode, onDragEdge: autoPanAt, onCardSize: onCardSize, show: showFilters, federated: props.federated, onInfraBounds: onInfraBounds, resetNonce: resetNonce, movedLayout: movedLayout, lanNodes: props.lanNodes })
             )
           ),
           h('div', { className: 'dm-zoom' },
@@ -1268,6 +1268,7 @@ function deviceLinkState(data, peer, lanMap) {
     function Topology(props) {
       var data = props.data
       var layout = props.layout
+      var lanNodes = props.lanNodes || []
       var show = props.show || { lan: true, public: true, sakura: true }
       // 2026-11-09-v5：卡片宽度自适应 —— 每次渲染后测量真实尺寸，回传父组件重算布局；
       // 同时把每张卡的实际尺寸给连线用（不同卡片宽窄不同，连线端点贴各自边缘）。
@@ -1368,6 +1369,29 @@ function deviceLinkState(data, peer, lanMap) {
   filterSelfPeers(data.peers || [], data.nodeName).forEach(function (p) {
     var t = p.tunnel || {}
     if (isLanPeer(p)) lanMap[peerDeviceKey(p.name)] = { up: Boolean(p.up), host: t.host, port: t.port, ip: t.ip || '', probe: t.probe || null }
+  })
+  // LAN 扫描发现的节点优先于公网/Sakura 归类（同机房的 peer 实际有局域网路径）
+  var lanByKey = {}
+  lanNodes.forEach(function (n) {
+    if (!n || n.service !== 'dsh-mesh') return
+    var k = peerDeviceKey(n.node || n.hostname || '')
+    if (k) lanByKey[k] = n
+  })
+  filterSelfPeers(data.peers || [], data.nodeName).forEach(function (p) {
+    var pk = peerDeviceKey(p.name)
+    if (lanMap[pk]) return
+    var hostKey = peerDeviceKey(p.hostname || '')
+    var cand = lanByKey[pk] || lanByKey[hostKey]
+    function lanAliasMatch(x, k) {
+      return x === k || (x.indexOf(k) === 0 && /^\d+$/.test(x.slice(k.length)))
+    }
+    if (!cand) {
+      Object.keys(lanByKey).some(function (k) {
+        if (lanAliasMatch(pk, k) || lanAliasMatch(hostKey, k)) { cand = lanByKey[k]; return true }
+        return false
+      })
+    }
+    if (cand) lanMap[pk] = { up: true, host: cand.address || cand.hostname, port: cand.port, ip: cand.address || cand.hostname, probe: { up: true } }
   })
   var nodes = [{
     key: 'local',
@@ -1562,14 +1586,14 @@ function deviceLinkState(data, peer, lanMap) {
     }
     var sizeN = sizeOf(n.key)
     // Sakura 服务器未加入拓扑时，peer 仍然通过 Sakura 隧道连到本机；不画这条边会让 peer 子树变成独立树
-    if (!sakuraVisible && n.sakuraTunnel) {
+    if (!sakuraVisible && !n.lanUp && n.sakuraTunnel) {
       var directTunnel = publicVisible
         ? { label: '公网', short: 'PUB', color: TRANSPORTS.public.color, dash: true }
         : { label: '未显示', short: 'LINK', color: '#8b949e', dash: true }
       svgEls = svgEls.concat(curve('sak-direct' + i, layout.positions[localNodeIdx], pa, n.sakuraUp === true, directTunnel, publicVisible ? '公网' : '', sizeOf('local'), sizeN, edgeRelated('local', n.key)))
     }
-    if (publicVisible && !n.sakuraTunnel && n.tunnel && n.tunnel.host && !isLanPeer(n) && (n.tunnel.kind === 'frp' || n.tunnel.kind === 'wan')) svgEls = svgEls.concat(curve('pub' + i, pa, aliyunPos, n.publicUp, TRANSPORTS.public, maskHost(n.tunnel.host) + ((n.tunnel.port) ? ':' + n.tunnel.port : ''), sizeN, aliyunSize, edgeRelated(n.key, 'server-aliyun')))
-    if (sakuraVisible && n.sakuraTunnel) svgEls = svgEls.concat(curve('sak' + i, pa, sakuraPos, n.sakuraUp === true, TRANSPORTS.sakura, maskText(n.sakuraTunnel.addr || ''), sizeN, sakuraSize, edgeRelated(n.key, 'server-sakura')))
+    if (publicVisible && !n.lanUp && !n.sakuraTunnel && n.tunnel && n.tunnel.host && !isLanPeer(n) && (n.tunnel.kind === 'frp' || n.tunnel.kind === 'wan')) svgEls = svgEls.concat(curve('pub' + i, pa, aliyunPos, n.publicUp, TRANSPORTS.public, maskHost(n.tunnel.host) + ((n.tunnel.port) ? ':' + n.tunnel.port : ''), sizeN, aliyunSize, edgeRelated(n.key, 'server-aliyun')))
+    if (sakuraVisible && !n.lanUp && n.sakuraTunnel) svgEls = svgEls.concat(curve('sak' + i, pa, sakuraPos, n.sakuraUp === true, TRANSPORTS.sakura, maskText(n.sakuraTunnel.addr || ''), sizeN, sakuraSize, edgeRelated(n.key, 'server-sakura')))
     if (sakuraVisible && n.candidate) svgEls = svgEls.concat(curve('cand' + i, pa, sakuraPos, false, TRANSPORTS.sakura, maskText(n.tunnel.addr || ''), sizeN, sakuraSize, edgeRelated(n.key, 'server-sakura')))
     if (show.lan && n.lanUp) { var lt = n.lanTunnel || {}; var lanAddr = (lt.ip || lt.host || 'LAN') + (lt.port ? ':' + lt.port : ''); svgEls = svgEls.concat(curve('lan' + i, layout.positions[localNodeIdx], pa, n.lanUp, TRANSPORTS.lan, lanAddr, sizeOf('local'), sizeN, edgeRelated('local', n.key))) }
   })
@@ -1581,7 +1605,7 @@ function deviceLinkState(data, peer, lanMap) {
       var linkKinds = []
       if (!node.local && !node.candidate) {
         if (node.lanUp) linkKinds.push('LAN')
-        if (node.sakuraTunnel) {
+        else if (node.sakuraTunnel) {
           if (sakuraVisible) linkKinds.push('Sakura')
           else if (publicVisible) linkKinds.push('公网')
         } else {
@@ -2633,6 +2657,8 @@ function deviceLinkState(data, peer, lanMap) {
       var forceRef = useRef({ at: 0, busy: false })
       var s5 = useState('local'); var selectedKey = s5[0]; var setSelectedKey = s5[1]
       var topoState = useState(0); var topoNonce = topoState[0]; var setTopoNonce = topoState[1]
+      var lanState = useState([]); var lanNodes = lanState[0]; var setLanNodes = lanState[1]
+      var lanAtRef = useRef(0)
       function topologyChanged() {
         setTopoNonce(function (n) { return n + 1 })
         load(false)
@@ -2644,6 +2670,13 @@ function deviceLinkState(data, peer, lanMap) {
           if (!r || !r.ok) return
           setDisabledPeerNames((r.peers || []).filter(function (p) { return p.disabled === true }).map(function (p) { return p.name || p.id }))
           setTopoNonce(function (n) { return n + 1 })
+        }).catch(function () { /* best effort */ })
+      }, [data && data.at])
+      useEffect(function () {
+        if (!data || !data.at || Date.now() - lanAtRef.current < 15000) return
+        lanAtRef.current = Date.now()
+        jsonFetch('/api/dsh-mesh/lan/scan').then(function (r) {
+          if (r && r.ok) { setLanNodes(r.nodes || []); setTopoNonce(function (n) { return n + 1 }) }
         }).catch(function () { /* best effort */ })
       }, [data && data.at])
       var panelState = useState(function () {
@@ -2809,7 +2842,7 @@ function deviceLinkState(data, peer, lanMap) {
 
         h('div', { className: 'dm-body', style: splitW > 0 ? { '--dm-main-w': splitW + 'px' } : undefined },
           h('div', { className: 'dm-pane' },
-            h(Viewport, { data: data, federated: federated, topoNonce: topoNonce, layout: computeLayout(1 + filterSelfPeers(dedupePeers(data.peers || []), data.nodeName).length + visibleSakuraCandidates().length), selectedKey: selectedKey, onSelect: setSelectedKey }),
+            h(Viewport, { data: data, federated: federated, topoNonce: topoNonce, lanNodes: lanNodes, layout: computeLayout(1 + filterSelfPeers(dedupePeers(data.peers || []), data.nodeName).length + visibleSakuraCandidates().length), selectedKey: selectedKey, onSelect: setSelectedKey }),
             h(DeviceDetails, { data: data, selectedKey: selectedKey })
           ),
           h('div', { className: 'dm-divider', onPointerDown: startSplit, title: '↔ 拖拽调整左右宽度（双击恢复默认）', onDoubleClick: function () { setSplitW(0); try { window.localStorage.removeItem('dsh-mesh-split-w') } catch (error) { /* ignore */ } } }),
