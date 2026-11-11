@@ -1896,17 +1896,19 @@ function deviceLinkState(data, peer, lanMap) {
 
       var tunnels = (props.data && props.data.tunnels) || {}
       var sakuraEndpoints = []
-      function addEndpoint(name, h, p, up) {
+      function addEndpoint(name, h, p, up, note) {
         h = String(h || ''); p = String(p || '')
         if (!h || !p) return
-        if (sakuraEndpoints.some(function (x) { return x.host === h && x.port === p })) return
-        sakuraEndpoints.push({ name: name || '樱花隧道', host: h, port: p, up: up === true })
+        var found = sakuraEndpoints.filter(function (x) { return x.host === h && x.port === p })[0]
+        if (found) { if (note && !found.note) found.note = note; return }
+        sakuraEndpoints.push({ name: name || '樱花隧道', host: h, port: p, up: up === true, note: note || '' })
       }
-      ;(tunnels.sakura && tunnels.sakura.tunnels || []).forEach(function (t) { addEndpoint(t.name, t.host, t.port, t.probe && t.probe.up) })
+      // 优先读账号 API（含 note 备注），再合并本机日志里的隧道
       ;(tunnels.sakuraAccount && tunnels.sakuraAccount.tunnels || []).forEach(function (t) {
-        if (t.host && t.port) addEndpoint(t.name, t.host, t.port, t.online === true)
-        else if (t.addr) { var m = /^([^:]+):(\d+)$/.exec(String(t.addr)); if (m) addEndpoint(t.name, m[1], m[2], t.online === true) }
+        if (t.host && t.port) addEndpoint(t.name, t.host, t.port, t.online === true, t.note)
+        else if (t.addr) { var m = /^([^:]+):(\d+)$/.exec(String(t.addr)); if (m) addEndpoint(t.name, m[1], m[2], t.online === true, t.note) }
       })
+      ;(tunnels.sakura && tunnels.sakura.tunnels || []).forEach(function (t) { addEndpoint(t.name, t.host, t.port, t.probe && t.probe.up, t.note) })
 
       function persist(nextMode, nextHost, nextPort) {
         try { window.localStorage.setItem('dsh-mesh-ui.publicConnection.v2', JSON.stringify({ mode: nextMode, host: nextHost, port: nextPort })) } catch (_) {}
@@ -1992,10 +1994,11 @@ function deviceLinkState(data, peer, lanMap) {
             h('div', { className: 'dm-sub' }, '自动读取本机樱花隧道入口，并检测它是否能响应 dsh-mesh 协议。'),
             sakuraEndpoints.length
               ? h('table', { className: 'dm-lan-table dm-sakura-table' },
-                h('thead', null, h('tr', null, h('th', null, '隧道'), h('th', null, '地址'), h('th', null, '状态'), h('th', null, '操作'))),
+                h('thead', null, h('tr', null, h('th', null, '隧道'), h('th', null, '备注'), h('th', null, '地址'), h('th', null, '状态'), h('th', null, '操作'))),
                 h('tbody', null, sakuraEndpoints.map(function (it, i) {
                   return h('tr', { key: i },
                     h('td', { title: it.name }, it.name),
+                    h('td', { className: 'dm-sakura-note', title: it.note || '' }, it.note || '—'),
                     h('td', { className: 'dm-mono' }, it.host + ':' + it.port),
                     h('td', null, h('span', { className: 'dm-chip ' + (it.up ? 'ok' : 'muted') }, it.up ? '在线' : '未探测')),
                     h('td', { className: 'dm-lan-actions' }, h('button', { className: 'dm-btn', disabled: busy, onClick: function () { setHost(it.host); setPort(it.port); persist(mode, it.host, it.port); runProbe(it.host, it.port, true) } }, '检测'))
@@ -3208,6 +3211,7 @@ body[data-ds-dark-theme] .dm-dg-fs-item.active { background:rgba(88,166,255,.28)
 .dm-lan-table th { text-align:left; font-weight:600; font-size:10.5px; opacity:.55; padding:4px 6px; border-bottom:1px solid rgba(128,128,128,.22); white-space:nowrap; }
 .dm-lan-table td { padding:5px 6px; border-bottom:1px solid rgba(128,128,128,.12); vertical-align:middle; overflow:visible; text-overflow:clip; white-space:nowrap; }
 .dm-lan-table td:nth-child(3) { white-space:normal; overflow-wrap:anywhere; }
+.dm-lan-table td.dm-sakura-note { white-space:normal; overflow-wrap:anywhere; opacity:.8; }
 .dm-lan-table td:last-child, .dm-lan-table th:last-child { text-align:right; white-space:nowrap; }
 .dm-lan-actions { display:flex; gap:5px; justify-content:flex-end; align-items:center; }
 .dm-lan-actions .dm-btn { padding:3px 7px; font-size:10.5px; }

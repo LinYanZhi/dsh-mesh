@@ -1,6 +1,6 @@
 {
   "name": "@linyanzhi/dsh-mesh",
-  "version": "0.3.11",
+  "version": "0.3.13",
   "description": "dsh-mesh main plugin: multi-device AI network topology in the DSH sidebar, with host bridge and server autostart installed as dependencies.",
   "type": "module",
   "main": "lib/index.js",
@@ -27,9 +27,9 @@
     }
   },
   "dependencies": {
-    "dsh-mesh-node": "0.0.21",
+    "dsh-mesh-node": "0.0.22",
     "dsh-mesh-host": "0.0.5",
-    "dsh-mesh-autostart": "0.0.13"
+    "dsh-mesh-autostart": "0.0.14"
   },
   "peerDependencies": {
     "@deepseek-ai/dsh": ">=0.2.0-rc.2 <0.3.0",

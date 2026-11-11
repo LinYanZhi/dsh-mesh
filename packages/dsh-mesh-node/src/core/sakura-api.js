@@ -83,6 +83,7 @@ export async function collectSakuraAccount({ ttlMs = CACHE_TTL_MS, token } = {})
       return {
         id: t.id,
         name: t.name,
+        note: t.note || '',
         type: t.type,
         nodeId: t.node,
         nodeName: node.name || '',
