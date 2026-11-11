@@ -559,7 +559,7 @@ body.light .dm-edge-label { stroke: rgba(255,255,255,.92); }
       // 服务器加入/移出拓扑后，刷新布局里的 serverCount，否则新 server 卡片不会出现
       useEffect(function () {
         setLayoutServerCount(visibleServerCount(props.data, currentFilters))
-      }, [props.data])
+      }, [props.data, props.topoNonce])
       function onCardSize(w, h) {
         setMeasuredSize(function (prev) {
           if (prev && prev.w === w && prev.h === h) return prev
@@ -2550,6 +2550,11 @@ function deviceLinkState(data, peer, lanMap) {
       var s6 = useState(""); var refreshHint = s6[0]; var setRefreshHint = s6[1]
       var forceRef = useRef({ at: 0, busy: false })
       var s5 = useState('local'); var selectedKey = s5[0]; var setSelectedKey = s5[1]
+      var topoState = useState(0); var topoNonce = topoState[0]; var setTopoNonce = topoState[1]
+      function topologyChanged() {
+        setTopoNonce(function (n) { return n + 1 })
+        load(false)
+      }
       var panelState = useState(function () {
         try { return JSON.parse(window.localStorage.getItem('dsh-mesh-ui.panels.v1') || '{}') || {} } catch (error) { return {} }
       })
@@ -2720,7 +2725,7 @@ function deviceLinkState(data, peer, lanMap) {
 
         h('div', { className: 'dm-body', style: splitW > 0 ? { '--dm-main-w': splitW + 'px' } : undefined },
           h('div', { className: 'dm-pane' },
-            h(Viewport, { data: data, federated: federated, layout: computeLayout(1 + filterSelfPeers(dedupePeers(data.peers || []), data.nodeName).length + sakuraCandidates().length), selectedKey: selectedKey, onSelect: setSelectedKey }),
+            h(Viewport, { data: data, federated: federated, topoNonce: topoNonce, layout: computeLayout(1 + filterSelfPeers(dedupePeers(data.peers || []), data.nodeName).length + sakuraCandidates().length), selectedKey: selectedKey, onSelect: setSelectedKey }),
             h(InfraPanels, { data: data }),
             h(DeviceDetails, { data: data, selectedKey: selectedKey })
           ),
@@ -2729,7 +2734,7 @@ function deviceLinkState(data, peer, lanMap) {
             h(Details, { title: '面板管理', badge: '显示 / 隐藏' }, h(PanelManager, { items: PANEL_ITEMS, hidden: hiddenPanels, onToggle: togglePanel })),
             !hiddenPanels.usage ? h(Details, { title: '使用说明' }, h(UsageHelpV2)) : null,
             !hiddenPanels.lan ? h(Details, { title: '局域网连接', badge: '扫描 / 配对' }, h(LanOnboarding, { onChanged: function () { load(true) } })) : null,
-            !hiddenPanels.public ? h(Details, { title: '公网连接', badge: '直连 / 樱花' }, h(PublicConnection, { data: data, onChanged: function () { load(true) } })) : null,
+            !hiddenPanels.public ? h(Details, { title: '公网连接', badge: '直连 / 樱花' }, h(PublicConnection, { data: data, onChanged: topologyChanged })) : null,
             !hiddenPanels.nodes ? h(Details, { title: '节点管理', badge: '仅本机生效' }, h(NodeManager, { onChanged: function () { load(true) } })) : null,
             !hiddenPanels.permissions ? h(Details, { title: '权限设置', badge: '本机 ACL' }, h(PermissionsPanel)) : null,
             !hiddenPanels.transfers ? h(Details, { title: '文件传输', badge: '历史' }, h(TransferHistory)) : null,
