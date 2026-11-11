@@ -522,7 +522,7 @@ body.light .dm-edge-label { stroke: rgba(255,255,255,.92); }
       var s = show || { lan: true, public: true, sakura: true }
       var d = data || {}
       var peers = filterSelfPeers(dedupePeers(d.peers || []), d.nodeName)
-      var hasPublic = Boolean(publicEntryFor(d.localTunnel || {})) || Boolean(selectedPublicServer()) || peers.some(function (p) { var pt = p.tunnel || {}; return !isLanPeer(p) && Boolean(pt.host) && (pt.kind === 'frp' || pt.kind === 'wan') })
+      var hasPublic = Boolean(publicEntryFor(d.localTunnel || {})) || Boolean(selectedPublicServer()) || peers.some(function (p) { var pt = p.tunnel || {}; return !sakuraTunnelOf(d, peerDeviceKey(p.name), p) && !isLanPeer(p) && Boolean(pt.host) && (pt.kind === 'frp' || pt.kind === 'wan') })
       var acc = sakuraAccountOf(d)
       // 只有用户明确加入的 Sakura 服务器才进入拓扑；账号里有隧道不等于用户同意展示
       var hasSakura = selectedSakuraServers().length > 0
@@ -1113,11 +1113,21 @@ function sakuraAccountOf(data) {
   if (port) filtered = list.filter(function (x) { return x.localPort == null || Number(x.localPort) === port })
   return Object.assign({}, base, { tunnels: filtered, total: filtered.length, online: filtered.filter(function (x) { return x.online }).length })
 }
-function sakuraTunnelOf(data, devKey) {
+function sakuraTunnelOf(data, devKey, peer) {
   var acc = sakuraAccountOf(data)
   if (!acc) return null
   var k = peerDeviceKey(devKey)
   for (var i = 0; i < (acc.tunnels || []).length; i++) if (acc.tunnels[i].deviceKey === k) return acc.tunnels[i]
+  // 配对后的 peer 名字不一定等于 Sakura 隧道名；优先用 URL host:port 反查
+  var t = (peer && peer.tunnel) || {}
+  var ph = String(t.host || '')
+  var pp = String(t.port || '')
+  var url = String((peer && peer.url) || '')
+  for (var j = 0; j < (acc.tunnels || []).length; j++) {
+    var x = acc.tunnels[j]
+    if (ph && pp && String(x.host) === ph && String(x.remotePort) === pp) return x
+    if (url && x.addr && url.indexOf(x.addr) >= 0) return x
+  }
   return null
 }
 // 设备状态 = 任一链路存活（全断才离线/红）
@@ -1129,7 +1139,7 @@ function deviceLinkState(data, peer, lanMap) {
   var publicUp = (probe ? probe.up === true : false) || Boolean(peer.up)
   var lan = lanMap ? lanMap[dk] : (t.kind === 'lan' ? { up: Boolean(peer.up), host: t.host, port: t.port, ip: t.ip || '' } : null)
   var lanUp = Boolean(lan && (lan.probe && lan.probe.up === true ? true : lan.up))
-  var st = sakuraTunnelOf(data, dk)
+  var st = sakuraTunnelOf(data, dk, peer)
   var sakuraUp = st ? st.online === true : null
   var anyUp = publicUp || sakuraUp === true || lanUp
   return { devKey: dk, publicUp: publicUp, lanUp: lanUp, lanTunnel: lan, sakuraUp: sakuraUp, sakuraTunnel: st, anyUp: anyUp }
@@ -1343,7 +1353,7 @@ function deviceLinkState(data, peer, lanMap) {
   var localPub = publicEntryFor(localTunnel)
   var selectedPublic = selectedPublicServer()
   if (selectedPublic) localPub = selectedPublic
-  var hasPublic = Boolean(localPub) || Boolean(selectedPublic) || peers.some(function (p) { var pt = p.tunnel || {}; return !isLanPeer(p) && Boolean(pt.host) && (pt.kind === 'frp' || pt.kind === 'wan') })
+  var hasPublic = Boolean(localPub) || Boolean(selectedPublic) || peers.some(function (p) { var pt = p.tunnel || {}; return !sakuraTunnelOf(data, peerDeviceKey(p.name), p) && !isLanPeer(p) && Boolean(pt.host) && (pt.kind === 'frp' || pt.kind === 'wan') })
   var publicVisible = show.public && hasPublic
   var sakuraRaw = sakuraAccountOf(data)
   var selectedSakuraList = selectedSakuraServers()
@@ -1485,7 +1495,7 @@ function deviceLinkState(data, peer, lanMap) {
       return
     }
     var sizeN = sizeOf(n.key)
-    if (publicVisible && n.tunnel && n.tunnel.host && !isLanPeer(n) && (n.tunnel.kind === 'frp' || n.tunnel.kind === 'wan')) svgEls = svgEls.concat(curve('pub' + i, pa, aliyunPos, n.publicUp, TRANSPORTS.public, maskHost(n.tunnel.host) + ((n.tunnel.port) ? ':' + n.tunnel.port : ''), sizeN, aliyunSize, edgeRelated(n.key, 'server-aliyun')))
+    if (publicVisible && !n.sakuraTunnel && n.tunnel && n.tunnel.host && !isLanPeer(n) && (n.tunnel.kind === 'frp' || n.tunnel.kind === 'wan')) svgEls = svgEls.concat(curve('pub' + i, pa, aliyunPos, n.publicUp, TRANSPORTS.public, maskHost(n.tunnel.host) + ((n.tunnel.port) ? ':' + n.tunnel.port : ''), sizeN, aliyunSize, edgeRelated(n.key, 'server-aliyun')))
     if (sakuraVisible && n.sakuraTunnel) svgEls = svgEls.concat(curve('sak' + i, pa, sakuraPos, n.sakuraUp === true, TRANSPORTS.sakura, maskText(n.sakuraTunnel.addr || ''), sizeN, sakuraSize, edgeRelated(n.key, 'server-sakura')))
     if (sakuraVisible && n.candidate) svgEls = svgEls.concat(curve('cand' + i, pa, sakuraPos, false, TRANSPORTS.sakura, maskText(n.tunnel.addr || ''), sizeN, sakuraSize, edgeRelated(n.key, 'server-sakura')))
     if (show.lan && n.lanUp) { var lt = n.lanTunnel || {}; var lanAddr = (lt.ip || lt.host || 'LAN') + (lt.port ? ':' + lt.port : ''); svgEls = svgEls.concat(curve('lan' + i, layout.positions[localNodeIdx], pa, n.lanUp, TRANSPORTS.lan, lanAddr, sizeOf('local'), sizeN, edgeRelated('local', n.key))) }
