@@ -193,6 +193,7 @@ dsh-mesh cluster status         # 本机 + 已配对节点的实例/延迟
 - 没有云端：数据只在你自己的机器和你的隧道之间
 - 桌面直控默认关闭，需要显式开启；不建议在不可信网络裸奔
 - 详细安全模型与风险：[SECURITY.md](SECURITY.md) · 权限说明：[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
+- 只读安全自检（不联网、不改配置）：`node tools/security-audit.mjs`
 
 ## 已知限制
 
@@ -228,6 +229,7 @@ dsh-mesh cluster status         # 本机 + 已配对节点的实例/延迟
 | 开发历程（为什么这样设计） | [docs/HISTORY.md](docs/HISTORY.md) |
 | 公网中继（自建 frps） | [docs/SELF-HOST-RELAY.md](docs/SELF-HOST-RELAY.md) |
 | 安全模型 / 风险 | [SECURITY.md](SECURITY.md) |
+| 安全自检脚本（只读） | `node tools/security-audit.mjs`（源码见 [tools/security-audit.mjs](tools/security-audit.mjs)） |
 | 版本变更 | [CHANGELOG.md](CHANGELOG.md) |
 | 参与开发 | [CONTRIBUTING.md](CONTRIBUTING.md) · [AGENTS.md](AGENTS.md) |
 

@@ -1,17 +1,65 @@
 # Security
 
-## Threat model
+> dsh-mesh 是给**你自己的设备**用的 AI 网络。它默认不设防到"装上就能用"，所以安全边界需要你确认一遍。
+> 本文是公开版安全模型；完整版（含具体风险矩阵与运营 checklist）在源码仓 `docs/SECURITY-MODEL.md`。
 
-dsh-mesh can delegate tasks and (optionally) operate desktops across devices. It is designed for **your own devices** connected by a relay you control. Do not expose control tokens to untrusted parties.
+## 威胁模型（Threat model）
 
-## Defaults (v0.1.0)
+- 使用者是**一个人**，网络里是**自己的几台设备**（PC + 手机），不是多租户/团队环境
+- 目标是跨机 AI 协作：读文件、传文件、委托任务、可选桌面控制
+- 给 AI 全权 = 对端 AI 能以**你的用户身份**做任何事（读写、执行、读凭据、操作桌面）
+- 主要威胁：① 对端设备被攻破；② 公网明文被嗅探/中间人；③ token/凭据泄露；④ 不可信网络里的陌生节点；⑤ 恶意插件
 
-- Remote desktop control (`pc_*` tools) is **disabled by default**; it must be enabled per node in config.
-- Every node has its own token with an explicit allow-list. There is no shared admin key.
-- Tokens are scoped per node; revoking one token does not affect others.
-- All tool calls are recorded in an append-only audit log.
-- Peers are pinned by TLS certificate fingerprint.
-- Enrollment requires an invite code (one-time, expiring) in the planned control plane.
+## 信任分层（建议）
+
+| 层级 | 谁 | 权限 | 网络要求 |
+|---|---|---|---|
+| **Owner（全权）** | 你自己的设备 | 读写工作区、执行白名单、委托、文件传输、可选桌面控制 | 必须 TLS + 指纹 pin；公网必须隧道 |
+| **Temporary（临时）** | 测试机 / 他人设备 | 只读或仅委托；不给写、不给 `pc_*`、不给 shell | 优先局域网；配对码短 TTL、用完撤销 |
+| **Untrusted（未配对）** | 发现的其它节点 | 仅能看到广播，不可调用 | — |
+
+实现：**按 peer 配 token 角色/ACL**，不要所有 peer 共用一份默认 ACL。
+
+## 全权授权的四个"必须"
+
+1. **跨公网必须 TLS + 指纹 pin**：`node.tls.enabled=true`；配对时 `--fingerprint`（或 `--ca`）；证书轮换后重新配对
+2. **凭据目录排除在 fsRoots 之外**：全权 ≠ 交出 `~/.ssh`、`~/.dsh*/.credentials.yaml`、`~/.dsh-mesh`（token/私钥）、浏览器 profile、`.git-credentials`
+3. **网络收口**：mesh 默认 `bind: 127.0.0.1`；跨网只走隧道；隧道端口非默认、云安全组限制来源；frps `auth.token` 长随机、dashboard 只监听 `127.0.0.1`
+4. **可观测 + 可撤销**：`~/.dsh-mesh/audit.jsonl`、peer 清单巡检、异常告警、`token revoke` 一键撤销
+
+## 默认值
+
+| 项 | 默认 | 备注 |
+|---|---|---|
+| `node.bind` | `127.0.0.1` | 不主动暴露 |
+| `node.tls.enabled` | `false` | 跨公网必须手动开 |
+| `acl.allow` | 默认工具集（读/写/委托/传输/日志） | deny-by-default，但对所有已配对 peer 生效 |
+| `acl.fsRoots` | 源码仓目录 | 不含主目录；但含代码 = 含 `.git` 配置 |
+| `shell.enabled` | `false` | `shell_run` 双闸门 |
+| `repair.enabled` | `false` | 修复类工具默认关 |
+| `pc_*` 桌面控制 | 默认关 | 需要显式开启 |
+| 配对码 | 一次性，默认 30 分钟、失败 5 次 | — |
+| 传输配额 | 4 MB/块、256 MB/文件、2 GB/天 | 防滥用 |
+| 审计 | `audit.jsonl` | 只增；分享前脱敏 |
+
+## 自检（只读）
+
+```sh
+node tools/security-audit.mjs          # 人类可读
+node tools/security-audit.mjs --json   # 给脚本/AI 解析
+node tools/security-audit.mjs --strict # 有 P0 时 exit 2
+```
+
+检查项：`bind`/TLS/证书、监听地址是否所有网卡、ACL 是否放行高风险工具（`shell_run`/`host_call`/`channel_*`/`repair_*`/`pc_*`）、`fsRoots` 是否覆盖凭据目录、公网 peer 是否 https 且带指纹、`secrets.json`/`host-token` 存在性、frpc 是否把 8124 映射到公网端口。
+
+**不联网、不改配置、不打印 token/私钥。**
+
+## 明确不做（避免误解）
+
+- 不是零信任/多租户平台：没有企业 SSO、没有审计认证
+- 不防"你自己的机器被管理员级入侵"
+- 不防恶意插件：DSH 插件是 in-process JS，权限等于你
+- 全权 peer 就是全权：边界靠设备信任 + fsRoots + 网络，而不是沙箱
 
 ## Reporting a vulnerability
 
