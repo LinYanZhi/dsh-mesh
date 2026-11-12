@@ -1,27 +1,25 @@
 # dsh-mesh — instructions for AI agents
 
-This repository is a **DSH (DeepSeek Harness) plugin monorepo**. If a user asks you to install, upgrade or debug it, follow the checklist below. Full detail: [docs/INSTALL-FOR-AGENTS.md](docs/INSTALL-FOR-AGENTS.md).
+This repository is the **release, docs and install-guide repo** for dsh-mesh (a DSH plugin bundle). The actual code is published to npm (`@linyanzhi/dsh-mesh`, `dsh-mesh-ui`, `dsh-mesh-host`, `dsh-mesh-node`, `dsh-mesh-autostart`). If a user asks you to install, upgrade or debug it, follow the checklist below. Full detail: [docs/INSTALL-FOR-AGENTS.md](docs/INSTALL-FOR-AGENTS.md).
 
 ## Quick path (installing on a DSH host)
 
 ```sh
 # 1. check prerequisites
 node --version                 # must be >= 22
-dsh --version                  # DSH >= 0.2.0-rc.2
+dsh --version                  # DSH >= 0.2.0-rc.2 (0.2.2-rc.1 recommended)
 
-# 2. install plugins into the user's profile
-dsh plugin --profile web add dsh-mesh-host dsh-mesh-ui dsh-mesh-autostart
+# 2. install the bundle into the user's profile
+dsh plugin --profile web add @linyanzhi/dsh-mesh
 
 # 3. verify package files landed
 ls ~/.dsh/profiles/web/node_modules | grep dsh-mesh
 
 # 4. restart the DSH instance (ask the user first), then check the left-sidebar **AI 网络** page
 
-# 5. optional mesh server
-npm i -g dsh-mesh-node
-dsh-mesh tls init
-dsh-mesh serve
-curl -k https://127.0.0.1:8124/health
+# 5. verify host bridge + nodes from the global CLI
+dsh-mesh host status
+dsh-mesh cluster status
 ```
 
 Windows uses the same commands (PowerShell); profile path is `$env:USERPROFILE\.dsh\profiles\web`.
@@ -69,7 +67,8 @@ Web UI check: left-sidebar **AI 网络** page visible, LAN onboarding card opens
 
 ## Repo conventions
 
-- `packages/*` are the published npm packages (`dsh-mesh-node`, `dsh-mesh-host`, `dsh-mesh-ui`, `dsh-mesh-autostart`).
-- `tools/*` are helper scripts copied into user installations (PC session-0 helper, phone kit, ops).
+- This repo ships **docs + release notes only**; npm packages are published separately:
+  `@linyanzhi/dsh-mesh` (bundle), `dsh-mesh-ui`, `dsh-mesh-host`, `dsh-mesh-node`, `dsh-mesh-autostart`.
+- `tools/*` helper scripts live in the source repo, not here.
 - Do not add secrets, personal paths, private IPs or credentials to this repository.
 - License: MIT.
