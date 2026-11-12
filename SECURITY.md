@@ -61,6 +61,15 @@ node tools/security-audit.mjs --strict # 有 P0 时 exit 2
 - 不防恶意插件：DSH 插件是 in-process JS，权限等于你
 - 全权 peer 就是全权：边界靠设备信任 + fsRoots + 网络，而不是沙箱
 
+## 补充：fsRoots 内部也要查凭据（2026-11-12）
+
+`acl.fsRoots` 只限制"能读哪些目录"，**不保证目录里的内容安全**。如果工作区内残留 `.credentials.yaml`、`*.token`、`host-token*` 等文件，已配对的 peer 仍然可以读。
+
+建议：
+- 定期扫 `fsRoots` 内的凭据/令牌文件，移到 fsRoots 之外（例如 `~/.dsh-mesh-secrets-archive/<日期>/`，移动不删除，保留清单）
+- `tools/security-audit.mjs` 会检查 fsRoots 是否覆盖主目录/凭据目录；文件级扫描需要自己按上面规则做
+- 归档目录不要在 fsRoots 内，否则等于没做
+
 ## Reporting a vulnerability
 
 Please open a private security advisory on GitHub, or contact the maintainer via the GitHub profile. Do not create a public issue for unpatched vulnerabilities.
