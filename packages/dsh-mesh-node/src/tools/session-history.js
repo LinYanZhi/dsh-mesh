@@ -3,6 +3,7 @@
 //       my-skills 的 dsh-sessions.mjs。现在 mesh server 在目标机本地跑 scripts/session-history.mjs
 //       解 zstd 会话日志 → 跨机一条命令看正文。
 import { spawnSync } from 'node:child_process'
+import { existsSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { homedir } from 'node:os'
 import { fileURLToPath } from 'node:url'
@@ -11,10 +12,36 @@ import { fail, ok } from '../core/result.js'
 
 const SCRIPT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', 'scripts', 'session-history.mjs')
 
+/**
+ * Resolve the DSH home that owns the session store for one instance.
+ *
+ * `~/.dshN` is the multi-instance layout, but it is not the only one: an
+ * application-managed deployment (for example a fnOS app) keeps a single
+ * instance directly under `$DSH_HOME/sessions`, and the Windows desktop build
+ * uses `~/.dsh` with no numeric suffix. Probe each candidate for a `sessions/`
+ * directory instead of inferring it from the instance name.
+ * @param instance - Instance id such as `dsh0` or `dsh1`.
+ * @returns Absolute path to the DSH home for that instance.
+ */
 function homeOf(instance) {
   const id = String(instance || 'dsh0').trim()
   const match = /^dsh(\d+)$/.exec(id)
-  return join(homedir(), `.dsh${match ? Number(match[1]) : 0}`)
+  const index = match ? Number(match[1]) : 0
+  const candidates = []
+  if (index === 0) {
+    const dshHome = String(process.env.DSH_HOME || '').trim()
+    if (dshHome) candidates.push(dshHome)
+    candidates.push(join(homedir(), '.dsh'))
+  }
+  candidates.push(join(homedir(), `.dsh${index}`))
+  const found = candidates.find((dir) => {
+    try {
+      return existsSync(join(dir, 'sessions'))
+    } catch {
+      return false
+    }
+  })
+  return found || candidates[candidates.length - 1]
 }
 
 export function buildSessionHistory() {
