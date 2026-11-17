@@ -30,6 +30,30 @@ window.__ModuleLoader__.load({
 
     // 2026-11-07 用户要求：卡片标题只用固定中文叫法，不显示电脑设备名
     var NODE_LABELS = {}
+    // nodeDisplay() 只拿得到节点名，所以在页面渲染时先把 hardware 登记到缓存，供按名字反查。
+    function rememberDeviceHardware(name, hw) {
+      if (!hw || typeof hw !== 'object') return
+      var key = peerDeviceKey(name)
+      if (key) DEVICE_HW[key] = hw
+      var raw = String(name || '').trim().toLowerCase()
+      if (raw) DEVICE_HW[raw] = hw
+    }
+    function rememberDeviceHardwareOf(data) {
+      if (!data) return
+      rememberDeviceHardware(data.nodeName, data.hardware)
+      var list = data.peers || []
+      for (var i = 0; i < list.length; i++) {
+        var peer = list[i]
+        if (peer && peer.hardware) rememberDeviceHardware(peer.name, peer.hardware)
+      }
+    }
+    function deviceType(nameOrHw) {
+      if (nameOrHw && typeof nameOrHw === 'object') return formFactorOf(nameOrHw)
+      var key = String(nameOrHw || '').trim().toLowerCase()
+      if (!key) return ''
+      var hw = DEVICE_HW[peerDeviceKey(key)] || DEVICE_HW[key]
+      return hw ? formFactorOf(hw) : ''
+    }
     // 2026-11-11：设备类型图标（笔记本 / 主机 / 手机），内联 SVG、无外部依赖、跟随文字颜色。
     // 主机 = 大屏幕 + 小底座（台式机显示器），与笔记本（屏幕+全宽底座线）区分。
     // 2026-11-11：用户明确不要擅自上色 —— 全部使用 currentColor，单色。
@@ -1498,6 +1522,7 @@ function deviceLinkState(data, peer, lanMap) {
       var endpoint = data.endpoint || {}
       var instances = (data.local && data.local.instances) || []
       var hw = data.hardware || {}
+      rememberDeviceHardwareOf(data)
       var localTunnel = data.localTunnel || {}
       var localUp = instances.filter(function (x) { return x.up }).length
       var localTunnelText = localTunnel.port
@@ -1984,6 +2009,7 @@ function deviceLinkState(data, peer, lanMap) {
       var peers = filterSelfPeers(dedupePeers(data.peers || []), data.nodeName)
       var relayHosts = relayHostSet(peers)
       var hw = data.hardware || {}
+      rememberDeviceHardwareOf(data)
       var instances = (data.local && data.local.instances) || []
       var endpoint = data.endpoint || {}
       var localTunnel = data.localTunnel || {}
@@ -2012,14 +2038,6 @@ function deviceLinkState(data, peer, lanMap) {
         if (!d || d.totalGB == null) return '—'
         var p = String(d.path || '').replace(/[\\/]+$/, '')
         return (d.freeGB != null ? d.freeGB : '?') + ' / ' + d.totalGB + ' GB' + (p ? ' (' + p + ')' : '')
-      }
-      // 设备类型：按平台/CPU 形态泛化推断（不依赖任何个人设备表）
-      function formFactorOf(h) {
-        if (!h) return '—'
-        if (h.platform === 'linux' && String(h.arch || '').indexOf('arm') === 0) return '手机'
-        var cpu = String(h.cpuModel || '')
-        if (/\b(i[3579]-\d{4,5}(U|H|P|HS)|Ryzen \d+ \d+(U|H|HS))\b/i.test(cpu)) return '笔记本'
-        return cpu ? '主机' : '—'
       }
       function memTextOf(h) {
         return h && h.memTotalGB ? ((h.memFreeGB != null ? h.memFreeGB : '?') + ' / ' + h.memTotalGB + ' GB') : '—'
