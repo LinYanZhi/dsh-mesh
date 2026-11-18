@@ -1,11 +1,12 @@
 # Changelog
 
-## Unreleased — 2026-11-17
+## 0.3.48 — 2026-11-18
 
-- CI: 新增 `tools/check-public-build.mjs` 不变量检查（sanitize 后 `deviceType/formFactorOf` 必须存在、session-history 脚本必须随包、包版本/依赖/入口一致），防止「语法通过但发布物白屏」再次发生。
-- CI: 新增客户端纯函数测试（`tools/client-helpers.test.mjs`，设备键归并 / 设备类型推断），与 selftest 一起进 GitHub Actions。
-- Fix 「AI 网络」整块白屏：公开镜像脱敏时删掉了硬编码设备表，`deviceType` 变成未定义；改为按 hardware 快照泛化推断（无个人设备表），并补 `rememberDeviceHardware` 缓存。感谢 @1349422030 的报告与 PR #10。
-- UI: 新增新人上手三步引导（本机就绪 → 发现第二台 → 开始派活），只有本机时给出下一步提示。
+- 版本：`dsh-mesh-node@0.0.24`、`dsh-mesh-ui@0.0.89`、`@linyanzhi/dsh-mesh@0.3.48`（Trusted Publishing 发布）
+- Fix 「AI 网络」整块白屏：公开镜像脱敏时 `deviceType` / `formFactorOf` 定义被删；改为 hardware 快照泛化推断并前置，公开包已通过构建不变量检查。感谢 @1349422030 的报告与 PR #10。
+- UI: 新增新人上手三步引导（本机就绪 → 发现第二台 → 开始派活）与只读演示模式。
+- CI: selftest 53 项、公开构建不变量、客户端纯函数测试全部进 GitHub Actions。
+- Refactor: `client.js` 源码拆分为 template + client-parts + CSS，生成物保持不变。
 - UI: 新增只读「演示模式」（示例设备/派发/结果/文件传输），不发起任何网络请求；用于单机第一次打开时看完整闭环。
 
 ## 0.3.47 — 2026-11-17
