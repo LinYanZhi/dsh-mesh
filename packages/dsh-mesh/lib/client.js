@@ -89,43 +89,6 @@ window.__ModuleLoader__.load({
         h('path', { d: 'M12 17v4' })
       )
     }
-    // DSH 宿主对渲染异常的处理是「吞掉整块」：SlotErrorBoundary 捕获后返回空 Anchor，
-    // 面板变纯白，错误只留在浏览器 console（静态 bundle 插件不走 slots.onEntryError 上报）。
-    // 所以 client.js 里任何未定义标识符都等于整页消失 —— 这里补齐设备类型推断。
-    var DEVICE_HW = {}
-    // 设备类型：按平台 / CPU 形态泛化推断（不依赖任何个人设备表）
-    function formFactorOf(h) {
-      if (!h) return '—'
-      if (h.platform === 'linux' && String(h.arch || '').indexOf('arm') === 0) return '手机'
-      var cpu = String(h.cpuModel || '')
-      if (/\b(i[3579]-\d{4,5}(U|H|P|HS)|Ryzen \d+ \d+(U|H|HS))\b/i.test(cpu)) return '笔记本'
-      return cpu ? '主机' : '—'
-    }
-    // nodeDisplay() 只拿到节点名、拿不到 hardware，所以在 Topology / DeviceDetails 渲染时
-    // 把各节点上报的 hardware 登记进来，供按名字反查机型。
-    function rememberDeviceHardware(name, hw) {
-      if (!hw || typeof hw !== 'object') return
-      var key = peerDeviceKey(name)
-      if (key) DEVICE_HW[key] = hw
-      var raw = String(name || '').trim().toLowerCase()
-      if (raw) DEVICE_HW[raw] = hw
-    }
-    function rememberDeviceHardwareOf(data) {
-      if (!data) return
-      rememberDeviceHardware(data.nodeName, data.hardware)
-      var list = data.peers || []
-      for (var i = 0; i < list.length; i++) {
-        var peer = list[i]
-        if (peer && peer.hardware) rememberDeviceHardware(peer.name, peer.hardware)
-      }
-    }
-    function deviceType(nameOrHw) {
-      if (nameOrHw && typeof nameOrHw === 'object') return formFactorOf(nameOrHw)
-      var key = String(nameOrHw || '').trim().toLowerCase()
-      if (!key) return ''
-      var hw = DEVICE_HW[peerDeviceKey(key)] || DEVICE_HW[key]
-      return hw ? formFactorOf(hw) : ''
-    }
     function nodeDisplay(name) {
       var label = nodeLabel(name)
       var type = deviceType(name)

@@ -275,7 +275,7 @@ dsh-mesh cluster status         # 本机 + 已配对节点的实例/延迟
 | 安全自检脚本（只读） | `node tools/security-audit.mjs`（源码见 [tools/security-audit.mjs](tools/security-audit.mjs)） |
 | 版本变更 | [CHANGELOG.md](CHANGELOG.md) |
 | 发布流程（Trusted Publishing） | [docs/RELEASE.md](docs/RELEASE.md) |
-| 参与开发 | [CONTRIBUTING.md](CONTRIBUTING.md) · [AGENTS.md](AGENTS.md) |
+| 参与开发 | [CONTRIBUTING.md](CONTRIBUTING.md) · [AGENTS.md](AGENTS.md) · [CONTRIBUTORS.md](CONTRIBUTORS.md) |
 
 > 本仓库用于发布说明、安装文档与 AI 安装指南；实际代码以 npm 包形式发布（`@linyanzhi/dsh-mesh` 等）。
 
