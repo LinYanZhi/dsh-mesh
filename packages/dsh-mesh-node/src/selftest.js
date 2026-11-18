@@ -80,6 +80,10 @@ async function writeConfigFile(home, config) {
 export async function runSelftest({ log = console } = {}) {
   const repoRoot = process.cwd()
   const home = mkdtempSync(join(tmpdir(), 'dsh-mesh-selftest-'))
+  // 跨平台“fsRoots 之外”的路径：Windows 用系统目录，Linux/macOS 用 /etc（两者都真实存在，
+  // 否则会先报 E_NOT_FOUND 而不是 ACL 的 E_DENIED，CI 在 Ubuntu 上会假失败）。
+  const outsidePath = process.platform === 'win32' ? (process.env.windir || 'C:\\Windows') : '/etc'
+  const outsideFile = process.platform === 'win32' ? join(outsidePath, 'win.ini') : join(outsidePath, 'hosts')
   mkdirSync(join(home, 'greppable'), { recursive: true })
   writeFileSync(join(home, 'greppable', 'a.txt'), 'alpha\nTODO: fix me\ngamma\n')
   writeFileSync(join(home, 'greppable', 'b.txt'), 'nothing here\n')
@@ -193,7 +197,7 @@ export async function runSelftest({ log = console } = {}) {
     })
 
     await check('fs_read outside fsRoots is denied (bad sample)', async () => {
-      const data = parseToolResult(await client.callTool({ name: 'fs_read', arguments: { path: 'C:\\Windows\\win.ini' } }))
+      const data = parseToolResult(await client.callTool({ name: 'fs_read', arguments: { path: outsideFile } }))
       assert(data.code === 'E_DENIED', `expected E_DENIED, got ${data.code}`)
     })
 
@@ -213,7 +217,7 @@ export async function runSelftest({ log = console } = {}) {
     })
 
     await check('fs_list outside fsRoots is denied (bad sample)', async () => {
-      const data = parseToolResult(await client.callTool({ name: 'fs_list', arguments: { path: 'C:\\Windows' } }))
+      const data = parseToolResult(await client.callTool({ name: 'fs_list', arguments: { path: outsidePath } }))
       assert(data.code === 'E_DENIED', `expected E_DENIED, got ${data.code}`)
     })
 
@@ -262,7 +266,7 @@ export async function runSelftest({ log = console } = {}) {
     })
 
     await check('fs_stats outside fsRoots is denied (bad sample)', async () => {
-      const data = parseToolResult(await client.callTool({ name: 'fs_stats', arguments: { path: 'C:\\Windows' } }))
+      const data = parseToolResult(await client.callTool({ name: 'fs_stats', arguments: { path: outsidePath } }))
       assert(data.code === 'E_DENIED', `expected E_DENIED, got ${data.code}`)
     })
 
