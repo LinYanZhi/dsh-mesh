@@ -18,3 +18,16 @@ jobs:
           for f in $files; do node --check "$f"; done
       - name: Public build invariants
         run: node tools/check-public-build.mjs
+  selftest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install dsh-mesh-node deps
+        working-directory: packages/dsh-mesh-node
+        run: npm install --omit=dev --no-audit --no-fund
+      - name: Run selftest
+        working-directory: packages/dsh-mesh-node
+        run: node src/selftest.js
