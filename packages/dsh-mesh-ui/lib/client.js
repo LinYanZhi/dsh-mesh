@@ -28,8 +28,17 @@ window.__ModuleLoader__.load({
     var REFRESH_MS = 5000
     var SUPPORTS_ZOOM = typeof CSS !== 'undefined' && typeof CSS.supports === 'function' && CSS.supports('zoom', '1.5')
 
-    // 2026-11-07 用户要求：卡片标题只用固定中文叫法，不显示电脑设备名
-    var NODE_LABELS = {}
+    // 2026-11-17：设备类型改为按 hardware 快照泛化推断，不再依赖个人设备表。
+    // 原因：公开镜像的脱敏构建会删掉含个人设备名的表；硬编码表被删后 deviceType 未定义，
+    // 整个「AI 网络」页面会被宿主 SlotErrorBoundary 吞成白屏（community PR #10）。
+    var DEVICE_HW = {}
+    function formFactorOf(h) {
+      if (!h) return '—'
+      if (h.platform === 'linux' && String(h.arch || '').indexOf('arm') === 0) return '手机'
+      var cpu = String(h.cpuModel || '')
+      if (/\b(i[3579]-\d{4,5}(U|H|P|HS)|Ryzen \d+ \d+(U|H|HS))\b/i.test(cpu)) return '笔记本'
+      return cpu ? '主机' : '—'
+    }
     // nodeDisplay() 只拿得到节点名，所以在页面渲染时先把 hardware 登记到缓存，供按名字反查。
     function rememberDeviceHardware(name, hw) {
       if (!hw || typeof hw !== 'object') return
@@ -38,6 +47,24 @@ window.__ModuleLoader__.load({
       var raw = String(name || '').trim().toLowerCase()
       if (raw) DEVICE_HW[raw] = hw
     }
+    function rememberDeviceHardwareOf(data) {
+      if (!data) return
+      rememberDeviceHardware(data.nodeName, data.hardware)
+      var list = data.peers || []
+      for (var i = 0; i < list.length; i++) {
+        var peer = list[i]
+        if (peer && peer.hardware) rememberDeviceHardware(peer.name, peer.hardware)
+      }
+    }
+    function deviceType(nameOrHw) {
+      if (nameOrHw && typeof nameOrHw === 'object') return formFactorOf(nameOrHw)
+      var key = String(nameOrHw || '').trim().toLowerCase()
+      if (!key) return ''
+      var hw = DEVICE_HW[peerDeviceKey(key)] || DEVICE_HW[key]
+      return hw ? formFactorOf(hw) : ''
+    }
+    // 2026-11-07 用户要求：卡片标题只用固定中文叫法，不显示电脑设备名
+    var NODE_LABELS = {}
     function rememberDeviceHardwareOf(data) {
       if (!data) return
       rememberDeviceHardware(data.nodeName, data.hardware)

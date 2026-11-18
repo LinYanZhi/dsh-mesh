@@ -16,3 +16,5 @@ jobs:
           files=$(git ls-files '*.mjs' '*.js' || true)
           if [ -z "$files" ]; then echo "no code yet"; exit 0; fi
           for f in $files; do node --check "$f"; done
+      - name: Public build invariants
+        run: node tools/check-public-build.mjs
