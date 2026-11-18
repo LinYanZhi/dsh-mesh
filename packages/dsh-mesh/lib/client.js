@@ -4611,6 +4611,13 @@ body[data-ds-dark-theme] .dm-dg-fs-item.active { background:rgba(88,166,255,.28)
 
     exports.apply = apply
     exports.inject = inject
+    // 2026-11-18：暴露纯函数给测试（DSH 只读 apply/inject，额外字段无副作用）。
+    exports.__test = {
+      peerDeviceKey: peerDeviceKey,
+      dedupePeers: dedupePeers,
+      formFactorOf: formFactorOf,
+      deviceType: deviceType
+    }
     return module.exports
   }
 })
