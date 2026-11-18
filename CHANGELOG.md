@@ -3,6 +3,7 @@
 ## Unreleased — 2026-11-17
 
 - CI: 新增 `tools/check-public-build.mjs` 不变量检查（sanitize 后 `deviceType/formFactorOf` 必须存在、session-history 脚本必须随包、包版本/依赖/入口一致），防止「语法通过但发布物白屏」再次发生。
+- CI: 新增客户端纯函数测试（`tools/client-helpers.test.mjs`，设备键归并 / 设备类型推断），与 selftest 一起进 GitHub Actions。
 - Fix 「AI 网络」整块白屏：公开镜像脱敏时删掉了硬编码设备表，`deviceType` 变成未定义；改为按 hardware 快照泛化推断（无个人设备表），并补 `rememberDeviceHardware` 缓存。感谢 @1349422030 的报告与 PR #10。
 - UI: 新增新人上手三步引导（本机就绪 → 发现第二台 → 开始派活），只有本机时给出下一步提示。
 - UI: 新增只读「演示模式」（示例设备/派发/结果/文件传输），不发起任何网络请求；用于单机第一次打开时看完整闭环。
