@@ -1349,11 +1349,23 @@ function sakuraAccountOf(data) {
   }
   return Object.assign({}, base, { tunnels: list, total: list.length, online: list.filter(function (x) { return x.online }).length })
 }
+// 2026-11-19：只把「localPort 指向当前 mesh server」的 Sakura 隧道算作设备通道。
+// 同一账号里还有音乐站等其它隧道（8787/8790），不能画成 AI 网络链路（用户看到peer-x 5 条线的根因）。
+function meshLocalPort(data) {
+  var lt = (data && data.localTunnel) || {}
+  var p = Number(lt.port || (data && data.local && data.local.port) || 8124)
+  return Number.isFinite(p) && p > 0 ? p : 8124
+}
+function isMeshSakuraTunnel(data, t) {
+  if (!t) return false
+  if (t.localPort == null) return true
+  return Number(t.localPort) === meshLocalPort(data)
+}
 function sakuraTunnelOf(data, devKey, peer) {
   var acc = sakuraAccountOf(data)
   if (!acc) return null
   var k = peerDeviceKey(devKey)
-  for (var i = 0; i < (acc.tunnels || []).length; i++) if (acc.tunnels[i].deviceKey === k) return acc.tunnels[i]
+  for (var i = 0; i < (acc.tunnels || []).length; i++) if (acc.tunnels[i].deviceKey === k && isMeshSakuraTunnel(data, acc.tunnels[i])) return acc.tunnels[i]
   // 配对后的 peer 名字不一定等于 Sakura 隧道名；优先用 URL host:port 反查
   var t = (peer && peer.tunnel) || {}
   var ph = String(t.host || '')
@@ -1361,6 +1373,7 @@ function sakuraTunnelOf(data, devKey, peer) {
   var url = String((peer && peer.url) || '')
   for (var j = 0; j < (acc.tunnels || []).length; j++) {
     var x = acc.tunnels[j]
+    if (!isMeshSakuraTunnel(data, x)) continue
     if (ph && pp && String(x.host) === ph && String(x.remotePort) === pp) return x
     if (url && x.addr && url.indexOf(x.addr) >= 0) return x
   }
