@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.49 — 2026-11-19
+
+- 回滚 0.3.48 的「看演示 / 上手三步」：演示弹层硬编码 `#fff` 背景，在 DSH 深色主题下变成白底白字（白屏），且默认注入主界面不合适；已移除这两块 UI。
+- 保留 0.3.48 的其他修复：`deviceType` 白屏修复、CI 测试、selftest、client 源码拆分。
+- 版本：`dsh-mesh-ui@0.0.90`、`@linyanzhi/dsh-mesh@0.3.49`（`dsh-mesh-node` 无改动）。
+
 ## 0.3.48 — 2026-11-18
 
 - 版本：`dsh-mesh-node@0.0.24`、`dsh-mesh-ui@0.0.89`、`@linyanzhi/dsh-mesh@0.3.48`（Trusted Publishing 发布）

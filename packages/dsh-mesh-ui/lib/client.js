@@ -3180,85 +3180,6 @@ function deviceLinkState(data, peer, lanMap) {
       )
     }
 
-    // 2026-11-17：新人第一次打开时先给一条「三步」引导；只有本机也能看演示，不碰网络/配对。
-    function OnboardingGuide(props) {
-      var data = (props && props.data) || {}
-      var peerList = (data.peers || []).filter(function (p) { return p && p.disabled !== true })
-      var hasPeer = peerList.length > 0
-      var total = (data.delegations && data.delegations.total) || 0
-      var steps = [
-        { n: 1, label: '本机就绪', done: data.ok !== false, hint: data.ok !== false ? '页面与 host bridge 已连通' : '先看下方诊断建议，修复本机连接' },
-        { n: 2, label: '发现第二台', done: hasPeer, hint: hasPeer ? '已发现 ' + peerList.length + ' 个对端' : '再装一台，或到「局域网连接」扫描 / 配对' },
-        { n: 3, label: '开始派活', done: total > 0, hint: total > 0 ? '已有 ' + total + ' 条委托记录' : '在会话里把任务委托给对端设备' }
-      ]
-      return h('div', {
-        className: 'dm-guide',
-        style: { display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', margin: '0 12px 10px', padding: '8px 12px', border: '1px solid rgba(128,128,128,.28)', borderRadius: 10 }
-      },
-        h('span', { className: 'dm-sub', style: { marginRight: 4 } }, '上手三步'),
-        steps.map(function (step) {
-          return h('span', {
-            key: 'step' + step.n,
-            title: step.hint,
-            style: { display: 'inline-flex', gap: 5, alignItems: 'center', fontSize: 12, padding: '2px 9px', borderRadius: 999, border: '1px solid ' + (step.done ? 'rgba(63,185,80,.55)' : 'rgba(128,128,128,.3)'), opacity: step.done ? 1 : 0.8 }
-          },
-            h('span', { style: { color: step.done ? '#3fb950' : 'inherit', fontWeight: 650 } }, step.done ? '✓' : String(step.n)),
-            h('span', null, step.label)
-          )
-        }),
-        h('span', { style: { flex: 1 } }),
-        h('button', { className: 'dm-btn', onClick: function () { if (props.onDemo) props.onDemo() }, title: '用示例数据看完整闭环（不连接任何设备）' }, '看演示'),
-        stepHintForGuide(hasPeer, total)
-      )
-    }
-
-    function stepHintForGuide(hasPeer, total) {
-      if (!hasPeer) return h('span', { className: 'dm-sub' }, '只有本机？先看演示，再去配第二台')
-      if (total === 0) return h('span', { className: 'dm-sub' }, '第二台已就绪，可以对它派活了')
-      return null
-    }
-
-    // 2026-11-17：演示模式 = 纯静态示例，不发请求、不读写 localStorage、不碰真实 peer。
-    function DemoPreview(props) {
-      var overlay = { position: 'fixed', inset: 0, background: 'rgba(0,0,0,.42)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }
-      var card = { width: 'min(720px, 94vw)', maxHeight: '86vh', overflow: 'auto', background: 'var(--dsh-bg, #fff)', color: 'inherit', borderRadius: 14, border: '1px solid rgba(128,128,128,.35)', boxShadow: '0 18px 60px rgba(0,0,0,.28)', padding: 18 }
-      var box = { border: '1px solid rgba(128,128,128,.25)', borderRadius: 10, padding: '10px 12px', marginTop: 10 }
-      return h('div', { style: overlay, onClick: function (e) { if (e.target === e.currentTarget && props.onClose) props.onClose() } },
-        h('div', { style: card },
-          h('div', { style: { display: 'flex', alignItems: 'center', gap: 8 } },
-            h('strong', { style: { fontSize: 15 } }, '演示模式 · 示例数据'),
-            h('span', { className: 'dm-sub' }, '不连接任何设备'),
-            h('span', { style: { flex: 1 } }),
-            h('button', { className: 'dm-btn', onClick: function () { if (props.onClose) props.onClose() } }, '关闭')
-          ),
-          h('div', { className: 'dm-sub', style: { marginTop: 6 } }, '下面是用假数据走一遍：发现设备 → 派发任务 → 结果回传 → 文件传输。真实页面里这些数据来自你的节点。'),
-          h('div', { style: box },
-            h('div', { className: 'dm-sub' }, '1. 设备'),
-            h('div', { style: { display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 6 } },
-              h('span', { className: 'dm-pill' }, '💻 本机 · 在线'),
-              h('span', { className: 'dm-sub' }, '—— 局域网 12ms ——'),
-              h('span', { className: 'dm-pill' }, '🖥️ 书房台式机 · 在线')
-            )
-          ),
-          h('div', { style: box },
-            h('div', { className: 'dm-sub' }, '2. 派发任务'),
-            h('div', { style: { marginTop: 6 } }, '「帮我把最新代码编译成 Windows 版，产物和报错发我」'),
-            h('div', { className: 'dm-sub', style: { marginTop: 4 } }, '→ 对端 AI 在自己的工作区执行，不需要你搬上下文')
-          ),
-          h('div', { style: box },
-            h('div', { className: 'dm-sub' }, '3. 结果回传'),
-            h('div', { style: { marginTop: 6 } }, '✓ 编译完成（退出码 0）· 产物 dist/app-win.zip'),
-            h('div', { className: 'dm-sub', style: { marginTop: 4 } }, '结果落在「委托台账」，摘要回到发起方会话')
-          ),
-          h('div', { style: box },
-            h('div', { className: 'dm-sub' }, '4. 文件传输'),
-            h('div', { style: { marginTop: 6 } }, 'build.log · 1.2 MB · sha256 已验证 · 记录可切「全网记录」查看')
-          ),
-          h('div', { className: 'dm-sub', style: { marginTop: 12 } }, '这只是外观演示，没有真实网络请求。想真正体验：装第二台 → 「局域网连接」扫描 → 输入一次性配对码。')
-        )
-      )
-    }
-
     function MeshStatusSection(props) {
       // 2026-11-11：页面变体。'legacy' = 默认「AI 网络」（保持原样）；'v2' = 独立沙箱「AI 网络2」。
       var variant = (props && props.variant) || 'legacy'
@@ -3343,8 +3264,6 @@ function deviceLinkState(data, peer, lanMap) {
         })
       }
       var sHelp = useState(false); var helpOpen = sHelp[0]; var setHelpOpen = sHelp[1]
-      // 2026-11-17：演示模式开关；只渲染静态示例，不发起任何请求。
-      var sDemo = useState(false); var demoOpen = sDemo[0]; var setDemoOpen = sDemo[1]
       var sPublic = useState(function () {
         try { return window.localStorage.getItem('dsh-mesh.show-public-addresses') === '1' } catch (error) { return false }
       })
@@ -3486,8 +3405,6 @@ function deviceLinkState(data, peer, lanMap) {
           refreshHint ? h('span', { className: 'dm-sub' }, refreshHint) : null
         ),
         error ? h('div', { className: 'dm-err' }, error) : null,
-        h(OnboardingGuide, { data: data, onDemo: function () { setDemoOpen(true) } }),
-
 
         h('div', { className: 'dm-body', style: splitW > 0 ? { '--dm-main-w': splitW + 'px' } : undefined },
           h('div', { className: 'dm-pane' },
@@ -3520,8 +3437,7 @@ function deviceLinkState(data, peer, lanMap) {
             ) : null
           )
         ),
-        h('div', { className: 'dm-foot' }, '数据源：mesh-health / host status / peer host_self / 委托台账 / 告警历史 · ' + (data.repo || '') + ' · node ' + (data.nodeVersion || '') + ' · ' + REFRESH_MS / 1000 + 's 自动刷新（只读）'),
-        demoOpen ? h(DemoPreview, { onClose: function () { setDemoOpen(false) } }) : null
+        h('div', { className: 'dm-foot' }, '数据源：mesh-health / host status / peer host_self / 委托台账 / 告警历史 · ' + (data.repo || '') + ' · node ' + (data.nodeVersion || '') + ' · ' + REFRESH_MS / 1000 + 's 自动刷新（只读）')
       )
     }
 
