@@ -12,7 +12,7 @@
 // 归宿：reusable（dsh-mesh/plugin/dsh-mesh-ui/lib/）
 
 import { collect, resolveRepo, meshHome, run, nodeExec } from './collect.js'
-import { listDelegations, sessionHistory, taskStatus } from './delegations.js'
+import { listDelegations, refreshActiveDelegations, sessionHistory, taskStatus } from './delegations.js'
 import { probePublicTarget } from './public-probe.js'
 import { permissionZh } from './permissions-zh.js'
 import { networkInterfaces } from 'node:os'
@@ -136,7 +136,7 @@ export function apply(ctx) {
   refresh().catch(() => {})
 
   // ---- 委托面板只读路由（2026-11-07 方案 A）----
-  const delegationCache = { at: 0, data: null }
+  const delegationCache = { at: 0, data: null, refreshing: false }
   const taskCache = new Map()
   const sessionCache = new Map()
   function cached(taskIdKey, map, ttlMs, producer) {
@@ -540,10 +540,28 @@ export function apply(ctx) {
 
   const delegateRoutes = [
     readonlyRoute('/api/dsh-mesh/delegations', async (url) => {
-      // 缓存整份列表（与请求的 limit 无关），避免不同 limit 的请求互相污染缓存
-      if (Date.now() - delegationCache.at > 15_000) {
-        delegationCache.at = Date.now()
+      const refresh = url.searchParams.get('refresh') === '1'
+      // Fast path: never block the UI on remote status probes. Return the local
+      // ledger immediately and reconcile in the background; the next 5s poll
+      // picks up fresh states. (Previously a slow/offline peer made this route
+      // wait 10-40s, so the header looked stuck on "loading".)
+      if (!delegationCache.data) {
         delegationCache.data = listDelegations(200)
+        delegationCache.at = Date.now()
+      }
+      if (refresh && !delegationCache.refreshing) {
+        delegationCache.refreshing = true
+        refreshActiveDelegations().then((data) => {
+          delegationCache.data = data
+          delegationCache.at = Date.now()
+        }).catch(() => {
+          /* keep last good ledger */
+        }).finally(() => {
+          delegationCache.refreshing = false
+        })
+      } else if (!refresh && Date.now() - delegationCache.at > 15_000) {
+        delegationCache.data = listDelegations(200)
+        delegationCache.at = Date.now()
       }
       const data = delegationCache.data
       const limit = Math.max(1, Math.min(Number(url.searchParams.get('limit')) || 100, 200))

@@ -162,6 +162,9 @@ export async function delegate() {
     from: localNodeName(),
       // 2026-11-07: record the local DSH instance that started this delegation
       fromInstance: instanceName(),
+    // 2026-11-23: record the originating DSH conversation so the UI can scope
+    // the delegation menu to the conversation that actually started it.
+    fromSessionId: String(process.env.DSH_SESSION_ID || '').trim(),
     dedicated,
     policy: chosen.created ? 'new' : 'continue',
     // 2026-11-06：记录「发起方请求的策略」——policy 是归一化后的 effective 值（auto 会被吃掉），审计要看这个
@@ -186,6 +189,8 @@ export async function delegate() {
     taskId,
     conversationId,
     from: task.from,
+    fromInstance: task.fromInstance,
+    fromSessionId: task.fromSessionId,
     to: peer.name,
     dedicated: task.dedicated === true,
     workspace: task.workspace || '',

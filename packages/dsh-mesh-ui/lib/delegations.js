@@ -61,6 +61,7 @@ export function listDelegations(limit = 50) {
         conversationId: task.conversationId || '',
         sessionId: task.sessionId || '',
         from,
+        fromSessionId: task.fromSessionId || '',
         fromLabel: nodeLabel(from),
         fromIsLocal: Boolean(from) && from === localNode,
         fromInstance: task.fromInstance || '',
@@ -146,9 +147,48 @@ async function artifactTimeline(repo, node, taskId) {
   return { requestedAt, finishedAt, durationSec, state: status?.state || '', summary: status?.summary || '', error: status?.error || '' }
 }
 
+const REFRESH_ACTIVE = new Set(['working', 'submitted', 'accepted', 'question', 'provisioning', 'running', 'stalled'])
+let refreshInFlight = null
+
+/**
+ * Reconcile active delegation ledger states with the target machine.
+ * Target agents write status.json/result.json locally; nothing pushes those
+ * writes back here. Calling mesh-delegate status (which already updates the
+ * ledger) is the reconciliation step. Keep it bounded and single-flight so a
+ * 5s UI poll cannot stampede every peer.
+ */
+export async function refreshActiveDelegations() {
+  if (refreshInFlight) return refreshInFlight
+  refreshInFlight = (async () => {
+    const repo = resolveRepo()
+    if (!repo) return listDelegations(200)
+    const registry = readJson(join(meshHome(), 'delegations.json'), { tasks: {} })
+    const active = Object.values(registry?.tasks || {})
+      .filter((task) => task && REFRESH_ACTIVE.has(String(task.state || '')) && task.node && task.taskId)
+      .slice(0, 6)
+    for (let i = 0; i < active.length; i += 4) {
+      const batch = active.slice(i, i + 4)
+      await Promise.all(
+        batch.map((task) =>
+          run(nodeExec(), [join(repo, 'scripts', 'mesh-delegate.mjs'), 'status', String(task.taskId)], {
+            cwd: repo,
+            timeout: 6000,
+            env: { ...process.env }
+          }).catch(() => null)
+        )
+      )
+    }
+    return listDelegations(200)
+  })()
+  try {
+    return await refreshInFlight
+  } finally {
+    refreshInFlight = null
+  }
+}
+
 /** 单任务状态 + 详情（只读；对端产物 + 会话元信息 + 时间线）。 */
-export async function taskStatus(taskId) {
-  const repo = resolveRepo()
+export async function taskStatus(taskId) {  const repo = resolveRepo()
   if (!repo) return { ok: false, error: 'dsh-mesh repo not found' }
   if (!/^[A-Za-z0-9._:-]{4,120}$/.test(String(taskId || ''))) return { ok: false, error: 'invalid taskId' }
   const registry = readJson(join(meshHome(), 'delegations.json'), { tasks: {} })

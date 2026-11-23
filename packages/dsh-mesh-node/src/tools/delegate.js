@@ -243,6 +243,11 @@ export function buildDelegate(ctx) {
         acceptance: z.string().max(4000).optional().describe('How to verify the result (optional).'),
         conversationId: z.string().max(120).optional().describe('Reuse a conversation id; defaults to a new one.'),
         sessionId: z.string().optional().describe('Continue THIS live DSH session (from an earlier delegate response or delegate_candidates). Omit to start a fresh conversation.'),
+        fromSessionId: z
+          .string()
+          .max(160)
+          .optional()
+          .describe('Originating DSH conversation id for UI scoping (optional; the mesh CLI records it automatically from DSH_SESSION_ID).'),
         force: z
           .boolean()
           .optional()
@@ -260,7 +265,7 @@ export function buildDelegate(ctx) {
           .optional()
           .describe('Name this delegated conversation yourself (short, human-readable). dsh-mesh adds the visual prefix "[委托] " automatically and pins the title so DSH auto-titling cannot overwrite it. If omitted, a fallback derived from the goal is used; prefer supplying one.')
       }),
-      handler: async ({ goal, scope, acceptance, conversationId, sessionId, instance, workspace, force, agentPreset, title }) => {
+      handler: async ({ goal, scope, acceptance, conversationId, sessionId, fromSessionId, instance, workspace, force, agentPreset, title }) => {
         try {
           const config = ctx.getConfig()
           const root = localRoot(config)
@@ -329,6 +334,7 @@ export function buildDelegate(ctx) {
             taskId,
             conversationId: convId,
             from: ctx.peerId || 'peer',
+            fromSessionId: String(fromSessionId || '').trim(),
             policy: created ? 'new' : 'continue',
             // 2026-11-06：MCP 无 policy 参数 —— 传 sessionId 即"发起方请求 continue"，否则 new
             requestedPolicy: sessionId ? 'continue' : 'new',
@@ -352,6 +358,7 @@ export function buildDelegate(ctx) {
             taskId,
             conversationId: convId,
             from: task.from,
+            fromSessionId: task.fromSessionId,
             workspace: task.workspace,
             goal,
             scope: task.scope,
