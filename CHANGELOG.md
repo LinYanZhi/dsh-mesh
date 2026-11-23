@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.53 — 2026-11-23
+
+- 修复委托顶栏卡片背景色：不再用 `prefers-color-scheme` 强制深色背景（会在浅色 DSH 主题下变暗），改用 DSH 原生菜单 surface token `--dsw-specific-menu`，并补 `backdrop-filter` 与原生一致的半透明模糊效果。
+- 版本：`dsh-mesh-ui@0.0.94`、`@linyanzhi/dsh-mesh@0.3.53`（`dsh-mesh-node` 版本不变）。
+
 ## 0.3.52 — 2026-11-23
 
 - 调整会话 header 委托入口，样式对齐 DSH 原生后台任务入口：无边框 tertiary label、28px 高、SVG chevron、原生菜单宽度/圆角/阴影，不再用自定义按钮样式。
