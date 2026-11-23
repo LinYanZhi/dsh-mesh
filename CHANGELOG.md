@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.55 — 2026-11-23
+
+- 委托顶栏原生 `StateDot` 不再套插件自定义 class，避免覆盖原生点大小/颜色；其余使用 DSH `MenuSurface` 与原生字号。
+- 版本：`dsh-mesh-ui@0.0.96`、`@linyanzhi/dsh-mesh@0.3.55`（`dsh-mesh-node` 版本不变）。
+
 ## 0.3.54 — 2026-11-23
 
 - 委托顶栏下拉框改用 DSH 原生 `MenuSurface` / `StateDot` / chevron（加载器允许时），字体、背景、阴影、圆角、backdrop blur 与原生后台任务下拉框一致；旧宿主自动降级到内置样式。

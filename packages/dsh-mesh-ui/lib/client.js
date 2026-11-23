@@ -4407,7 +4407,7 @@ function DelegationHeaderAction() {
     },
       (active.length || attention.length)
         ? (active.length && DG_TOP_STATE_DOT
-            ? h(DG_TOP_STATE_DOT, { state: 'ongoing', className: 'dm-dg-top-dot' })
+            ? h(DG_TOP_STATE_DOT, { state: 'ongoing' })
             : h('span', { className: 'dm-dg-top-dot' + (active.length ? ' run' : ' warn') }))
         : null,
       h('span', { className: 'dm-dg-top-count' }, label || '委托异常'),
