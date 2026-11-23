@@ -3582,6 +3582,36 @@ body[data-ds-dark-theme] .dm-dg-fs-item.active { background:rgba(88,166,255,.28)
   .dm-dg-notice.ok { color:#3fb950; } .dm-dg-notice.bad { color:#ff7b72; }
   .dm-dg-chip.ok { color:#3fb950; } .dm-dg-to { color:#79b8ff; } .dm-dg-chip.run { color:#79b8ff; } .dm-dg-chip.warn { color:#d29922; } .dm-dg-chip.bad { color:#ff7b72; }
 }
+
+/* 会话 header 的委托计数入口：样式跟随 DSH 顶栏，不写死背景色 */
+.dm-dg-top { position:relative; display:inline-flex; align-items:center; }
+.dm-dg-top-btn { display:inline-flex; align-items:center; gap:6px; border:1px solid transparent; border-radius:8px; background:transparent; color:inherit; font:inherit; font-size:12px; line-height:20px; padding:2px 7px; cursor:pointer; white-space:nowrap; }
+.dm-dg-top-btn:hover { background:var(--dsw-alias-fill-l1, rgba(128,128,128,.12)); }
+.dm-dg-top-btn:focus-visible { outline:2px solid var(--dsw-alias-state-focus, rgba(88,166,255,.65)); outline-offset:1px; }
+.dm-dg-top-dot { width:7px; height:7px; border-radius:50%; flex:none; background:var(--dsw-alias-label-tertiary, rgba(128,128,128,.7)); }
+.dm-dg-top-dot.run { background:#3b82d6; }
+.dm-dg-top-dot.warn { background:#d29922; }
+.dm-dg-top-caret { font-size:9px; opacity:.55; transform:translateY(-1px); }
+.dm-dg-top-caret.open { transform:translateY(-1px) rotate(180deg); }
+.dm-dg-topmenu { position:fixed; z-index:10000; width:min(390px, 92vw); max-height:min(460px, 70vh); overflow:auto; box-sizing:border-box; padding:7px; border:1px solid var(--dsw-alias-border-l1, rgba(128,128,128,.35)); border-radius:11px; background:var(--dsw-specific-menu, var(--dsw-alias-fill-l1, #fff)); color:inherit; box-shadow:0 12px 34px rgba(0,0,0,.22); }
+.dm-dg-topmenu-head { display:flex; align-items:baseline; gap:8px; padding:4px 7px 7px; border-bottom:1px solid var(--dsw-alias-border-l1, rgba(128,128,128,.2)); font-size:12px; }
+.dm-dg-topmenu-head .dm-dg-sub { margin-left:auto; }
+.dm-dg-topmenu-list { display:flex; flex-direction:column; }
+.dm-dg-topmenu-row { display:flex; flex-direction:column; gap:4px; padding:8px 7px; border-bottom:1px solid var(--dsw-alias-border-l1, rgba(128,128,128,.14)); }
+.dm-dg-topmenu-row:last-child { border-bottom:none; }
+.dm-dg-topmenu-line { display:flex; align-items:center; gap:7px; min-width:0; }
+.dm-dg-topmenu-to { font-size:11.5px; font-weight:600; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.dm-dg-topmenu-time { margin-left:auto; font-size:10.5px; opacity:.5; white-space:nowrap; font-variant-numeric:tabular-nums; }
+.dm-dg-topmenu-goal { font-size:11px; opacity:.72; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.dm-dg-topmenu-foot { padding:7px 7px 3px; font-size:10.5px; opacity:.45; border-top:1px solid var(--dsw-alias-border-l1, rgba(128,128,128,.18)); }
+.dm-dg-topmenu-err { margin:5px 7px; padding:6px 8px; border:1px solid rgba(248,81,73,.4); border-radius:7px; color:#c9362c; font-size:11px; }
+body[data-ds-dark-theme] .dm-dg-topmenu { background:#24262b; border-color:rgba(255,255,255,.16); box-shadow:0 12px 34px rgba(0,0,0,.55); }
+body[data-ds-dark-theme] .dm-dg-topmenu-err { color:#ff7b72; }
+@media (prefers-color-scheme: dark) {
+  .dm-dg-topmenu { background:#24262b; border-color:rgba(255,255,255,.16); box-shadow:0 12px 34px rgba(0,0,0,.55); }
+  .dm-dg-topmenu-err { color:#ff7b72; }
+}
+
 `
 
     // 仿 DSH StateDot 的 ongoing 转圈环（1.5s 转 + 弧线呼吸）
@@ -4270,6 +4300,109 @@ body[data-ds-dark-theme] .dm-dg-fs-item.active { background:rgba(88,166,255,.28)
   .dm-pane { overflow:visible; padding-right:0; }
 }
 `
+// ================= 顶栏：委托任务计数（只读卡片） =================
+// 2026-11-23：跨设备委托以前只能进「委托」面板看；这里对齐后台任务入口，
+// 在会话 header 加一个「N 个委托任务」，点开就是进行中/待处理的卡片。
+// 只读：数据来自 /api/dsh-mesh/delegations，不创建/不取消任务。
+var DG_TOP_ACTIVE = { accepted: 1, submitted: 1, working: 1, running: 1, provisioning: 1, question: 1, stalled: 1 }
+var DG_TOP_ATTENTION = { question: 1, stalled: 1, failed: 1 }
+
+function dgTopIsActive(task) {
+  var state = String((task && (task.displayState || task.state)) || '')
+  return (task && task.isActive === true) || DG_TOP_ACTIVE[state] === 1
+}
+function dgTopNeedsAttention(task) {
+  var state = String((task && (task.displayState || task.state)) || '')
+  return DG_TOP_ATTENTION[state] === 1
+}
+function dgTopLabel(active, attention) {
+  if (active > 0) return active + ' 个委托任务'
+  if (attention > 0) return attention + ' 个委托待处理'
+  return ''
+}
+
+function DelegationHeaderAction() {
+  var sTasks = useState([]); var tasks = sTasks[0]; var setTasks = sTasks[1]
+  var sOpen = useState(false); var open = sOpen[0]; var setOpen = sOpen[1]
+  var sPos = useState(null); var pos = sPos[0]; var setPos = sPos[1]
+  var sErr = useState(''); var error = sErr[0]; var setError = sErr[1]
+  var rootRef = useRef(null)
+  var aliveRef = useRef(true)
+
+  useEffect(function () {
+    aliveRef.current = true
+    function load() {
+      dgFetch('/api/dsh-mesh/delegations?limit=50').then(function (json) {
+        if (!aliveRef.current) return
+        if (json && json.ok) { setTasks(Array.isArray(json.tasks) ? json.tasks : []); setError('') }
+        else setError((json && (json.error || json.code)) || '委托接口不可用')
+      }).catch(function (err) {
+        if (aliveRef.current) setError(dgFriendly(err))
+      })
+    }
+    load()
+    var timer = setInterval(load, 5000)
+    return function () { aliveRef.current = false; clearInterval(timer) }
+  }, [])
+
+  useEffect(function () {
+    if (!open) return undefined
+    function onDoc(event) {
+      if (rootRef.current && !rootRef.current.contains(event.target)) setOpen(false)
+    }
+    function onKey(event) { if (event.key === 'Escape') setOpen(false) }
+    document.addEventListener('mousedown', onDoc)
+    document.addEventListener('keydown', onKey)
+    return function () { document.removeEventListener('mousedown', onDoc); document.removeEventListener('keydown', onKey) }
+  }, [open])
+
+  var active = tasks.filter(dgTopIsActive)
+  var attention = tasks.filter(dgTopNeedsAttention)
+  var label = dgTopLabel(active.length, attention.length)
+  if (!label && !error) return null
+  var rows = active.concat(attention.filter(function (task) { return active.indexOf(task) < 0 })).slice(0, 8)
+
+  function toggle() {
+    if (!open && rootRef.current) {
+      var rect = rootRef.current.getBoundingClientRect()
+      setPos({ top: Math.round(rect.bottom + 6), right: Math.max(8, Math.round(window.innerWidth - rect.right)) })
+    }
+    setOpen(!open)
+  }
+
+  return h('span', { ref: rootRef, className: 'dm-dg-top' },
+    h('button', {
+      type: 'button',
+      className: 'dm-dg-top-btn' + (attention.length ? ' attention' : ''),
+      'aria-expanded': open,
+      'aria-label': label || '委托任务',
+      title: error || label,
+      onClick: toggle
+    },
+      h('span', { className: 'dm-dg-top-dot' + (active.length ? ' run' : attention.length ? ' warn' : '') }),
+      h('span', null, label || '委托异常'),
+      h('span', { className: 'dm-dg-top-caret' + (open ? ' open' : '') }, '▾')
+    ),
+    open ? h('div', { className: 'dm-dg-topmenu', style: pos ? { top: pos.top + 'px', right: pos.right + 'px' } : undefined },
+      h('div', { className: 'dm-dg-topmenu-head' },
+        h('strong', null, '委托任务'),
+        h('span', { className: 'dm-dg-sub' }, active.length + ' 个进行中' + (attention.length ? ' · ' + attention.length + ' 个待处理' : ''))
+      ),
+      error ? h('div', { className: 'dm-dg-topmenu-err' }, error) : null,
+      rows.length ? h('div', { className: 'dm-dg-topmenu-list' }, rows.map(function (task) {
+        return h('div', { className: 'dm-dg-topmenu-row', key: task.taskId || task.conversationId },
+          h('div', { className: 'dm-dg-topmenu-line' },
+            dgChip(task.displayState || task.state || 'unknown'),
+            h('span', { className: 'dm-dg-topmenu-to' }, (task.nodeLabel || task.node || '?') + (task.instance ? ' · ' + task.instance : '')),
+            h('span', { className: 'dm-dg-topmenu-time' }, dgClock(task.displayAt || task.updatedAt))
+          ),
+          h('div', { className: 'dm-dg-topmenu-goal', title: task.goal || '' }, task.goal || '(无目标)')
+        )
+      })) : h('div', { className: 'dm-dg-empty' }, '没有进行中的委托'),
+      h('div', { className: 'dm-dg-topmenu-foot' }, '详情见左侧「委托」面板')
+    ) : null
+  )
+}
     function MeshNetworkPage(props) {
       var variant = (props && props.variant) || 'legacy'
       // 宽度偏好：与 DSH 对话区相同语义——空 = 默认宽度，数字 = 用户拖拽固定值。
@@ -4516,6 +4649,14 @@ body[data-ds-dark-theme] .dm-dg-fs-item.active { background:rgba(88,166,255,.28)
         }))
       } catch (error) {
         console.warn('[dsh-mesh-ui] delegation panel registration failed:', error)
+      }
+      // 2026-11-23：会话 header 加「N 个委托任务」，对齐后台任务入口；只读。
+      try {
+        disposers.push(ctx.slots.inject('conversation.session.header.actions', function () {
+          return ctx.slots.register({ name: 'conversation.session.header.actions', id: 'mesh-delegations', order: 21 }, DelegationHeaderAction)
+        }))
+      } catch (error) {
+        console.warn('[dsh-mesh-ui] delegation header action registration failed:', error)
       }
       var navObserver = null
       var navTimer = null
