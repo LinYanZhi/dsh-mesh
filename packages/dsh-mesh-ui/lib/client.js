@@ -23,6 +23,10 @@ window.__ModuleLoader__.load({
     var useEffect = React.useEffect
     var useRef = React.useRef
     var useCallback = React.useCallback
+    // 2026-11-23：优先使用 DSH 原生 UI primitives（和后台任务下拉框同一套 MenuSurface/图标）；
+    // 旧宿主/加载器不允许 require 时降级到本插件自己的样式，不能让整个页面白屏。
+    var primitives = null
+    try { primitives = require('@deepseek-ai/dsh-client-ui-primitives') } catch (error) { primitives = null }
 
     var API = '/api/dsh-mesh/status'
     var REFRESH_MS = 5000
@@ -3594,12 +3598,13 @@ body[data-ds-dark-theme] .dm-dg-fs-item.active { background:rgba(88,166,255,.28)
 .dm-dg-top-count { margin:0 5px; }
 .dm-dg-top-chevron { color:var(--dsw-alias-label-tertiary); flex:none; transition:transform .12s; }
 .dm-dg-top-chevron.open { transform:rotate(180deg); }
-.dm-dg-topmenu { position:fixed; z-index:100; width:min(500px, calc(100vw - 32px)); max-height:min(480px, calc(100vh - 140px)); overflow:auto; box-sizing:border-box; padding:4px; border:.5px solid var(--dsw-alias-border-l1, rgba(128,128,128,.35)); border-radius:var(--dsw-radius-md, 10px); background:var(--dsw-specific-menu, var(--dsw-menu-surface-fill, var(--dsw-alias-bg-layer-2, #fff))); -webkit-backdrop-filter:blur(20px) saturate(1.2); backdrop-filter:blur(20px) saturate(1.2); color:var(--dsw-alias-label-primary, inherit); box-shadow:var(--dsw-elevation-prominent, 0 12px 34px rgba(0,0,0,.22)); }
-.dm-dg-topmenu-head { display:flex; align-items:baseline; gap:8px; padding:5px 7px 7px; border-bottom:.5px solid var(--dsw-alias-border-l1, rgba(128,128,128,.2)); font-size:11px; line-height:16px; color:var(--dsw-alias-label-tertiary, inherit); }
-.dm-dg-topmenu-head strong { color:var(--dsw-alias-label-secondary, inherit); font-size:12px; }
-.dm-dg-topmenu-head .dm-dg-sub { margin-left:auto; }
+.dm-dg-topmenu { position:fixed; z-index:100; width:min(500px, calc(100vw - 32px)); max-height:min(480px, calc(100vh - 140px)); overflow:auto; box-sizing:border-box; padding:4px; border:.5px solid var(--dsw-alias-border-l2, rgba(128,128,128,.35)); border-radius:var(--dsw-radius-md, 10px); background:var(--dsw-specific-menu, var(--dsw-menu-surface-fill, var(--dsw-alias-bg-layer-2, #fff))); -webkit-backdrop-filter:var(--dsw-menu-backdrop-filter, blur(40px) saturate(150%)); backdrop-filter:var(--dsw-menu-backdrop-filter, blur(40px) saturate(150%)); color:var(--dsw-alias-label-primary, inherit); font-size:12px; line-height:17px; box-shadow:var(--dsw-elevation-prominent, 0 12px 34px rgba(0,0,0,.22)); }
+.dm-dg-topmenu.native { border-radius:var(--dsw-radius-md, 10px); }
+.dm-dg-topmenu-head { display:flex; align-items:baseline; gap:8px; padding:5px 7px 7px; border-bottom:.5px solid var(--dsw-alias-border-l2, rgba(128,128,128,.2)); font-size:11px; line-height:16px; color:var(--dsw-alias-label-tertiary, inherit); }
+.dm-dg-topmenu-head strong { color:var(--dsw-alias-label-secondary, inherit); font-size:12px; line-height:17px; font-weight:500; }
+.dm-dg-topmenu-head .dm-dg-sub { margin-left:auto; font-size:11px; line-height:16px; }
 .dm-dg-topmenu-list { display:flex; flex-direction:column; gap:1px; }
-.dm-dg-topmenu-row { display:flex; flex-direction:column; gap:3px; padding:6px 7px; border-radius:var(--dsw-radius-md, 8px); }
+.dm-dg-topmenu-row { display:flex; flex-direction:column; gap:3px; padding:6px 7px; border-radius:var(--dsw-radius-md, 8px); font-size:12px; line-height:17px; }
 @media (hover:hover) { .dm-dg-topmenu-row:hover { background:var(--dsw-alias-fill-l1, rgba(128,128,128,.08)); } }
 .dm-dg-topmenu-line { display:flex; align-items:center; gap:7px; min-width:0; }
 .dm-dg-topmenu-to { font-size:12px; font-weight:600; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--dsw-alias-label-primary, inherit); }
@@ -4318,6 +4323,10 @@ function dgTopLabel(active, attention) {
   return ''
 }
 
+var DG_TOP_MENU = primitives && primitives.MenuSurface ? primitives.MenuSurface : null
+var DG_TOP_STATE_DOT = primitives && primitives.StateDot ? primitives.StateDot : null
+var DG_TOP_CHEVRON = primitives && primitives.IconChevronDownOutlineRegular ? primitives.IconChevronDownOutlineRegular : null
+
 function DelegationHeaderAction() {
   var sTasks = useState([]); var tasks = sTasks[0]; var setTasks = sTasks[1]
   var sOpen = useState(false); var open = sOpen[0]; var setOpen = sOpen[1]
@@ -4367,6 +4376,26 @@ function DelegationHeaderAction() {
     setOpen(!open)
   }
 
+  var menuStyle = pos ? { top: pos.top + 'px', right: pos.right + 'px' } : undefined
+  var menuChildren = [
+    h('div', { className: 'dm-dg-topmenu-head', key: 'head' },
+      h('strong', null, '委托任务'),
+      h('span', { className: 'dm-dg-sub' }, active.length + ' 个进行中' + (attention.length ? ' · ' + attention.length + ' 个待处理' : ''))
+    ),
+    error ? h('div', { className: 'dm-dg-topmenu-err', key: 'err' }, error) : null,
+    rows.length ? h('div', { className: 'dm-dg-topmenu-list', key: 'list' }, rows.map(function (task) {
+      return h('div', { className: 'dm-dg-topmenu-row', key: task.taskId || task.conversationId },
+        h('div', { className: 'dm-dg-topmenu-line' },
+          dgChip(task.displayState || task.state || 'unknown'),
+          h('span', { className: 'dm-dg-topmenu-to' }, (task.nodeLabel || task.node || '?') + (task.instance ? ' · ' + task.instance : '')),
+          h('span', { className: 'dm-dg-topmenu-time' }, dgClock(task.displayAt || task.updatedAt))
+        ),
+        h('div', { className: 'dm-dg-topmenu-goal', title: task.goal || '' }, task.goal || '(无目标)')
+      )
+    })) : h('div', { className: 'dm-dg-empty', key: 'empty' }, '没有进行中的委托'),
+    h('div', { className: 'dm-dg-topmenu-foot', key: 'foot' }, '详情见左侧「委托」面板')
+  ]
+
   return h('span', { ref: rootRef, className: 'dm-dg-top' },
     h('button', {
       type: 'button',
@@ -4376,39 +4405,32 @@ function DelegationHeaderAction() {
       title: error || label,
       onClick: toggle
     },
-      (active.length || attention.length) ? h('span', { className: 'dm-dg-top-dot' + (active.length ? ' run' : ' warn') }) : null,
+      (active.length || attention.length)
+        ? (active.length && DG_TOP_STATE_DOT
+            ? h(DG_TOP_STATE_DOT, { state: 'ongoing', className: 'dm-dg-top-dot' })
+            : h('span', { className: 'dm-dg-top-dot' + (active.length ? ' run' : ' warn') }))
+        : null,
       h('span', { className: 'dm-dg-top-count' }, label || '委托异常'),
-      h('svg', {
-        className: 'dm-dg-top-chevron' + (open ? ' open' : ''),
-        width: 12,
-        height: 12,
-        viewBox: '0 0 24 24',
-        fill: 'none',
-        stroke: 'currentColor',
-        'stroke-width': 2,
-        'stroke-linecap': 'round',
-        'stroke-linejoin': 'round',
-        'aria-hidden': 'true'
-      }, h('path', { d: 'M6 9l6 6 6-6' }))
+      DG_TOP_CHEVRON
+        ? h(DG_TOP_CHEVRON, { size: 12, className: 'dm-dg-top-chevron' + (open ? ' open' : '') })
+        : h('svg', {
+            className: 'dm-dg-top-chevron' + (open ? ' open' : ''),
+            width: 12,
+            height: 12,
+            viewBox: '0 0 24 24',
+            fill: 'none',
+            stroke: 'currentColor',
+            'stroke-width': 2,
+            'stroke-linecap': 'round',
+            'stroke-linejoin': 'round',
+            'aria-hidden': 'true'
+          }, h('path', { d: 'M6 9l6 6 6-6' }))
     ),
-    open ? h('div', { className: 'dm-dg-topmenu', style: pos ? { top: pos.top + 'px', right: pos.right + 'px' } : undefined },
-      h('div', { className: 'dm-dg-topmenu-head' },
-        h('strong', null, '委托任务'),
-        h('span', { className: 'dm-dg-sub' }, active.length + ' 个进行中' + (attention.length ? ' · ' + attention.length + ' 个待处理' : ''))
-      ),
-      error ? h('div', { className: 'dm-dg-topmenu-err' }, error) : null,
-      rows.length ? h('div', { className: 'dm-dg-topmenu-list' }, rows.map(function (task) {
-        return h('div', { className: 'dm-dg-topmenu-row', key: task.taskId || task.conversationId },
-          h('div', { className: 'dm-dg-topmenu-line' },
-            dgChip(task.displayState || task.state || 'unknown'),
-            h('span', { className: 'dm-dg-topmenu-to' }, (task.nodeLabel || task.node || '?') + (task.instance ? ' · ' + task.instance : '')),
-            h('span', { className: 'dm-dg-topmenu-time' }, dgClock(task.displayAt || task.updatedAt))
-          ),
-          h('div', { className: 'dm-dg-topmenu-goal', title: task.goal || '' }, task.goal || '(无目标)')
-        )
-      })) : h('div', { className: 'dm-dg-empty' }, '没有进行中的委托'),
-      h('div', { className: 'dm-dg-topmenu-foot' }, '详情见左侧「委托」面板')
-    ) : null
+    open
+      ? (DG_TOP_MENU
+          ? h(DG_TOP_MENU, { className: 'dm-dg-topmenu native', style: menuStyle }, menuChildren)
+          : h('div', { className: 'dm-dg-topmenu', style: menuStyle }, menuChildren))
+      : null
   )
 }
     function MeshNetworkPage(props) {

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.54 — 2026-11-23
+
+- 委托顶栏下拉框改用 DSH 原生 `MenuSurface` / `StateDot` / chevron（加载器允许时），字体、背景、阴影、圆角、backdrop blur 与原生后台任务下拉框一致；旧宿主自动降级到内置样式。
+- 修正字号：菜单 12px/17px、分组标题 11px/16px、按钮与原生 header action 一致。
+- 版本：`dsh-mesh-ui@0.0.95`、`@linyanzhi/dsh-mesh@0.3.54`（`dsh-mesh-node` 版本不变）。
+
 ## 0.3.53 — 2026-11-23
 
 - 修复委托顶栏卡片背景色：不再用 `prefers-color-scheme` 强制深色背景（会在浅色 DSH 主题下变暗），改用 DSH 原生菜单 surface token `--dsw-specific-menu`，并补 `backdrop-filter` 与原生一致的半透明模糊效果。
