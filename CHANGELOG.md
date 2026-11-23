@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.56 — 2026-11-23
+
+- 会话顶栏「N 个委托任务」对齐原生后台任务：常驻入口、运行中 loading 点、已结束分组、原生锚点/字体/箭头，按当前会话 `fromSessionId` 过滤。
+- 委托状态对账不再阻塞首屏：先返回本地台账，后台刷新远端状态；首屏加载有明确 loading 状态。
+- 委托行进 → 左侧「委托」面板；行支持键盘 Enter/Space。
+- 委托台账/CLI/MCP 开始记录发起会话 `fromSessionId`；dsh-mesh 自更新默认改为 notify-only，需显式 `--approve`。
+- 版本：`dsh-mesh-ui@0.0.97`、`@linyanzhi/dsh-mesh@0.3.56`（`dsh-mesh-node` 版本不变）。
+
 ## 0.3.55 — 2026-11-23
 
 - 委托顶栏原生 `StateDot` 不再套插件自定义 class，避免覆盖原生点大小/颜色；其余使用 DSH `MenuSurface` 与原生字号。
