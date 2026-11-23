@@ -11,6 +11,7 @@ import { buildRepairFs } from './repair-fs.js'
 import { buildCluster } from './cluster.js'
 import { buildDelegate } from './delegate.js'
 import { buildSessionHistory } from './session-history.js'
+import { buildSessionRegistry } from './session-registry.js'
 import { buildConfigPatch } from './config-patch.js'
 import { buildAlerts } from './alerts.js'
 import { buildControl } from './control.js'
@@ -35,6 +36,7 @@ export function buildAll(ctx) {
     ...buildCluster(ctx),
     ...buildDelegate(ctx),
     ...buildSessionHistory(ctx),
+    ...buildSessionRegistry(ctx),
     ...buildConfigPatch(ctx),
     ...buildAlerts(ctx),
     ...buildControl(ctx),

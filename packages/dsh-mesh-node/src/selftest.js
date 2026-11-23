@@ -159,7 +159,11 @@ export async function runSelftest({ log = console } = {}) {
         'task_status',
         'task_list',
         'task_cancel',
-        'mesh_audit_tail'
+        'mesh_audit_tail',
+        'sessions_list',
+        'sessions_running',
+        'schedules_list',
+        'session_schedule_links'
       ]) {
         assert(names.includes(expected), `missing ${expected}`)
       }
