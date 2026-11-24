@@ -1,11 +1,16 @@
 // SakuraFrp 账号级隧道状态（只读）：读本机 Launcher token + 调 api.natfrp.com/v4/tunnels（+ /v4/nodes 解析节点域名）
 // 用途：PC 端即可看到同账号下所有设备（含手机）的樱花隧道在线状态，不依赖对端上报。
 // 安全：token 只在内存中使用，绝不写日志/输出；结果缓存 60s。
-import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs'
+import { basename, dirname, join } from 'node:path'
 import { homedir } from 'node:os'
 
 const API_BASE = 'https://api.natfrp.com'
+const LOG_DIRS = [
+  'C:/ProgramData/SakuraFrpService/Logs',
+  '/var/log/sakurafrp',
+  join(homedir(), '.config', 'sakurafrp', 'logs')
+]
 // 2026-11-09：动态检测——默认 5s 重新拉取账号隧道状态（SAKURA_POLL_MS 可覆盖；<=3s 会被抬到 3s）
 const CACHE_TTL_MS = Math.max(3000, Number(process.env.SAKURA_POLL_MS || 5000))
 
@@ -126,5 +131,48 @@ export async function collectSakuraAccount({ ttlMs = CACHE_TTL_MS, token } = {})
     cache = { at: Date.now(), data, ttl: Math.max(ttlMs, 300_000) }
   saveCache()
     return data
+  }
+}
+
+/** Redact credentials accidentally present in Sakura logs before a log line leaves this process. */
+export function redactSakuraLog(text) {
+  return String(text || '')
+    .replace(/Bearer\s+[A-Za-z0-9._~+\/-]+=*/gi, 'Bearer [REDACTED]')
+    .replace(/((?:access_)?token|authorization)("?\s*[:=]\s*["']?)[A-Za-z0-9._~+\/-]{16,}/gi, '$1$2[REDACTED]')
+    .replace(/\b[a-f0-9]{32,}\b/gi, '[REDACTED]')
+}
+
+/** Tail the newest Sakura launcher log (read-only; bounded lines/bytes; always redacted). */
+export function readSakuraLogs({ lines = 80, maxBytes = 64 * 1024 } = {}) {
+  const n = Math.max(1, Math.min(Number(lines) || 80, 200))
+  const cap = Math.max(4096, Math.min(Number(maxBytes) || 64 * 1024, 256 * 1024))
+  let newest = null
+  for (const dir of LOG_DIRS) {
+    if (!existsSync(dir)) continue
+    try {
+      for (const name of readdirSync(dir)) {
+        if (!/\.log$/i.test(name) && !/sakura/i.test(name)) continue
+        const file = join(dir, name)
+        const at = statSync(file).mtimeMs
+        if (!newest || at > newest.at) newest = { file, at }
+      }
+    } catch {
+      /* try next dir */
+    }
+  }
+  if (!newest) return { available: false, error: '未找到 Sakura 日志目录/文件', lines: [] }
+  try {
+    const text = readFileSync(newest.file, 'utf8')
+    const tail = text.slice(Math.max(0, text.length - cap))
+    const rows = tail.split(/\r?\n/).slice(-n).map((line) => redactSakuraLog(line.slice(0, 2000)))
+    return {
+      available: true,
+      file: basename(newest.file),
+      updatedAt: new Date(newest.at).toISOString(),
+      lines: rows,
+      truncated: text.length > cap
+    }
+  } catch (error) {
+    return { available: false, error: String(error?.message || error), lines: [] }
   }
 }

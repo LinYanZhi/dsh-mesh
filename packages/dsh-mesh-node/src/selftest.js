@@ -10,6 +10,7 @@ import { roleAllow, inferRole } from './core/roles.js'
 import { applyPatchInsert, assertInside, normalizePluginFiles, patchHasPlugin, pluginRoot } from './core/repair.js'
 import { hostTokenPath, resolveHostInstance } from './core/host-agent.js'
 import { buildAll, isAllowed } from './tools/index.js'
+import { redactSakuraLog } from './core/sakura-api.js'
 import { run } from './core/util.js'
 import { startMeshServer } from './server.js'
 
@@ -856,6 +857,19 @@ export async function runSelftest({ log = console } = {}) {
     assert(archive, 'host_session_archive missing from the tool manifest')
     assert(archive.handler instanceof Function, 'host_session_archive has no handler')
     assert(!isAllowed(config, 'host_session_archive'), 'host_session_archive must be denied by default')
+  })
+
+  await check('tools: sakura P1 tools are exposed, default-allowed, and logs are redacted', async () => {
+    const config = defaultConfig()
+    const tools = buildAll({ getConfig: () => config, home: join(tmpdir(), 'selftest-tools'), peerId: 'selftest', log: quiet })
+    for (const name of ['sakura_status', 'sakura_tunnels', 'sakura_logs']) {
+      assert(tools.some((tool) => tool.name === name), `${name} missing from the tool manifest`)
+      assert(isAllowed(config, name), `${name} should be read-only default-allowed`)
+    }
+    const text = redactSakuraLog('Authorization: Bearer abcdef0123456789 token=supersecretvalue 0123456789abcdef0123456789abcdef')
+    assert(!/abcdef0123456789/.test(text), 'Bearer token must be redacted')
+    assert(!/supersecretvalue/.test(text), 'token= value must be redacted')
+    assert(!/0123456789abcdef0123456789abcdef/.test(text), 'long hex token must be redacted')
   })
 
   await check('roles: controller can delegate but not cross-machine writes/restarts', () => {

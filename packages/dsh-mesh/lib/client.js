@@ -3740,6 +3740,7 @@ body[data-ds-dark-theme] .dm-dg-topmenu-err { color:#ff7b72; }
       var s16 = useState(''); var filterFromNode = s16[0]; var setFilterFromNode = s16[1]
       var s17 = useState(''); var filterToNode = s17[0]; var setFilterToNode = s17[1]
       var s19 = useState(null); var rich = s19[0]; var setRich = s19[1]
+      var s20 = useState(null); var pendingSelectId = s20[0]; var setPendingSelectId = s20[1]
       var s18 = useState(function () {
         try {
           var saved = window.localStorage.getItem('dsh-mesh-list-width')
@@ -3862,6 +3863,33 @@ body[data-ds-dark-theme] .dm-dg-topmenu-err { color:#ff7b72; }
           .catch(function (err) { flash('bad', '查询任务状态失败：' + dgFriendly(err)) })
           .finally(function () { setTaskLoading(false) })
       }
+
+      // 顶栏「委托任务」点击后：跨 slot 通知本面板选中同一条任务。
+      // 面板可能尚未 mount（先导航再挂载），所以同时留一个 window 待处理值。
+      useEffect(function () {
+        function onSelect(event) {
+          var taskId = event && event.detail && event.detail.taskId
+          if (taskId) setPendingSelectId(String(taskId))
+        }
+        window.addEventListener('dsh-mesh:select-delegation', onSelect)
+        try {
+          var pending = window.__dshMeshSelectDelegation
+          if (pending) { window.__dshMeshSelectDelegation = ''; setPendingSelectId(String(pending)) }
+        } catch (error) { /* ignore */ }
+        return function () { window.removeEventListener('dsh-mesh:select-delegation', onSelect) }
+      }, [])
+
+      useEffect(function () {
+        if (!pendingSelectId || !list) return
+        var rows = list.tasks || []
+        for (var i = 0; i < rows.length; i++) {
+          if (rows[i].taskId === pendingSelectId) {
+            setPendingSelectId(null)
+            selectTask(rows[i])
+            return
+          }
+        }
+      }, [pendingSelectId, list])
 
       function loadSession() {
         if (!selected || !selected.sessionId) return
@@ -4480,6 +4508,10 @@ function DelegationHeaderAction(props) {
     var color = labelColor(task)
     var openPanel = function () {
       setOpen(false)
+      try {
+        window.__dshMeshSelectDelegation = task.taskId
+        window.dispatchEvent(new CustomEvent('dsh-mesh:select-delegation', { detail: { taskId: task.taskId } }))
+      } catch (error) { /* ignore */ }
       try { if (props && typeof props.onOpenPanel === 'function') props.onOpenPanel() } catch (_) { /* ignore */ }
     }
     // 官方 JobListAction：运行中用 StateDot 表达状态，不再重复写“运行中”；

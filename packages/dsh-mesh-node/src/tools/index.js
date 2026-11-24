@@ -17,6 +17,7 @@ import { buildAlerts } from './alerts.js'
 import { buildControl } from './control.js'
 import { buildControlApps } from './control-apps.js'
 import { buildControlPath } from './control-path.js'
+import { buildSakura } from './sakura.js'
 import { denied, internal, notFound } from '../core/result.js'
 import { short } from '../core/util.js'
 
@@ -41,7 +42,8 @@ export function buildAll(ctx) {
     ...buildAlerts(ctx),
     ...buildControl(ctx),
     ...buildControlApps(ctx),
-    ...buildControlPath()
+    ...buildControlPath(),
+    ...buildSakura(ctx)
   ]
 }
 
