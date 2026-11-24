@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.57 — 2026-11-24
+
+- 新增 Sakura P1 只读工具：`sakura_status` / `sakura_tunnels` / `sakura_logs`；日志脱敏，token 不返回。
+- 委托顶栏点击行自动选中左侧「委托」面板对应任务。
+- 新增发布/开发/验证工具：`release-dsh-mesh.mjs`、`dsh-ui-dev.mjs`、`mesh-verify-tools.mjs`、`sakura-api-probe.mjs`。
+- 版本：`dsh-mesh-ui@0.0.98`、`@linyanzhi/dsh-mesh@0.3.57`（`dsh-mesh-node` 版本不变）。
+
 ## 0.3.56 — 2026-11-23
 
 - 会话顶栏「N 个委托任务」对齐原生后台任务：常驻入口、运行中 loading 点、已结束分组、原生锚点/字体/箭头，按当前会话 `fromSessionId` 过滤。
