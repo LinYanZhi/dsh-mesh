@@ -66,6 +66,7 @@ const CONTROLLER = [
   'delegate_cancel',
   'host_session_create',
   'host_session_prompt',
+  'host_session_permission',
   'pc_action',
   'pc_app',
   'pc_window',

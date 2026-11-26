@@ -229,11 +229,30 @@ export function buildHost(ctx) {
         title: z.string().max(120).optional().describe('User-owned session title to pin immediately (stops DSH auto-titling), e.g. [委托]修复登录页.'),
         sessionId: z.string().optional().describe('Adopt this exact session id instead of generating one (rarely needed).'),
         workspaceId: z.string().optional().describe('Attach to a registered workspace id instead of a raw cwd.'),
+        permission: z.string().max(80).optional().describe('Optional permission preset for the new session (e.g. danger-full-access). DSH permission is session-local; this sets it before the first prompt.'),
         instance: instanceSchema
       }),
-      handler: async ({ cwd, agentPreset, title, sessionId, workspaceId, instance }) => {
+      handler: async ({ cwd, agentPreset, title, sessionId, workspaceId, permission, instance }) => {
         try {
-          return ok(await hostClient(ctx, instance).createSession({ cwd, agentPreset, sessionId, workspaceId, title }))
+          return ok(await hostClient(ctx, instance).createSession({ cwd, agentPreset, sessionId, workspaceId, title, permission }))
+        } catch (error) {
+          return hostError(error)
+        }
+      }
+    },
+    {
+      name: 'host_session_permission',
+      title: 'Set one DSH session permission preset on this machine',
+      description:
+        'Set the session-local permission preset (sandbox mode + approval policy) for an existing DSH conversation through the host bridge. Useful when a delegated session was created before the desired permission was known. Denied by default — the node ACL must allow host_session_permission.',
+      inputSchema: z.object({
+        sessionId: z.string().describe('Target DSH session id.'),
+        permission: z.string().max(80).describe('Permission preset key, e.g. read-only / workspace-write / danger-full-access.'),
+        instance: instanceSchema
+      }),
+      handler: async ({ sessionId, permission, instance }) => {
+        try {
+          return ok(await hostClient(ctx, instance).setSessionPermission({ sessionId, permission }))
         } catch (error) {
           return hostError(error)
         }

@@ -38,7 +38,7 @@ export const name = 'dsh-mesh-host'
 /** Services this plugin needs before `apply` runs. */
 export const inject = ['tools', 'agents']
 
-export const PLUGIN_VERSION = '0.6.0'
+export const PLUGIN_VERSION = '0.6.1'
 const MAX_BODY_BYTES = 256 * 1024
 const DEFAULT_TIMEOUT_MS = 120_000
 
@@ -260,6 +260,21 @@ export function apply(ctx) {
   // instead of a silent no-op.
   const sessionController = () => optionalService('sessionController')
 
+  // Permission is a session-local DSH service (not a sessionController.create
+  // option in DSH 0.2.2). Apply it explicitly after creation so a delegated
+  // conversation can inherit the caller's intended sandbox/approval policy.
+  const applyPermission = (sessionId, permission) => {
+    const presets = optionalService('permissionPresets')
+    if (!presets || typeof presets.set !== 'function') {
+      throw Object.assign(new Error('this DSH profile mounts no permissionPresets service (cannot set permission)'), { code: 'E_HOST_NO_PERMISSION' })
+    }
+    const agent = ctx.agents?.get?.(sessionId)
+    if (!agent) {
+      throw Object.assign(new Error(`no live agent for session: ${sessionId}`), { code: 'E_HOST_NO_AGENT' })
+    }
+    presets.set(agent.session, permission)
+  }
+
   const requireSessionController = () => {
     const controller = sessionController()
     if (!controller || typeof controller.create !== 'function' || typeof controller.prompt !== 'function') {
@@ -469,6 +484,7 @@ export function apply(ctx) {
         }
         const optionalText = (value) => (typeof value === 'string' && value.trim() ? value.trim() : undefined)
         const title = optionalText(payload.title)
+        const permission = optionalText(payload.permission)
         const request = {
           ...(optionalText(payload.cwd) === undefined ? {} : { cwd: optionalText(payload.cwd) }),
           ...(optionalText(payload.sessionId) === undefined ? {} : { sessionId: optionalText(payload.sessionId) }),
@@ -484,6 +500,7 @@ export function apply(ctx) {
         try {
           const created = await controller.create(request)
           const sessionId = String(created?.sessionId || '')
+          if (permission && sessionId) applyPermission(sessionId, permission)
           let acceptedTitle
           let titleWarning
           if (title && sessionId) {
@@ -504,6 +521,7 @@ export function apply(ctx) {
             ...(acceptedTitle === undefined ? {} : { title: acceptedTitle }),
             ...(titleWarning === undefined ? {} : { titleWarning }),
             ...(created?.agentPreset === undefined ? {} : { agentPreset: created.agentPreset }),
+            ...(permission === undefined ? {} : { permission }),
             plugin: PLUGIN_VERSION
           })
         } catch (error) {
@@ -512,6 +530,24 @@ export function apply(ctx) {
             code: error?.code || 'E_HOST_SESSION_CREATE',
             message: error?.message || String(error)
           })
+        }
+      }
+
+      if (req.method === 'POST' && url.pathname === '/host/sessions/permission') {
+        let payload
+        try {
+          payload = JSON.parse((await readBody(req)) || '{}')
+        } catch {
+          return json(res, 400, { ok: false, code: 'E_INVALID_ARG', message: 'body must be JSON' })
+        }
+        const sessionId = typeof payload.sessionId === 'string' ? payload.sessionId.trim() : ''
+        const permission = typeof payload.permission === 'string' ? payload.permission.trim() : ''
+        if (!sessionId || !permission) return json(res, 400, { ok: false, code: 'E_INVALID_ARG', message: 'sessionId and permission are required' })
+        try {
+          applyPermission(sessionId, permission)
+          return json(res, 200, { ok: true, sessionId, permission, plugin: PLUGIN_VERSION })
+        } catch (error) {
+          return json(res, 200, { ok: false, code: error?.code || 'E_HOST_PERMISSION', message: error?.message || String(error), sessionId, permission })
         }
       }
 

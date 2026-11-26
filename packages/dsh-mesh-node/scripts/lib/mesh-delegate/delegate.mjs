@@ -57,6 +57,7 @@ export async function chooseSession(peer, policy, conversation, forcedSession, w
     instance: target.id,
     ...(workspace ? { cwd: workspace } : {}),
     agentPreset: arg('preset', 'standard'),
+    ...(arg('permission') ? { permission: arg('permission') } : {}),
     title: delegationTitle(textArg('goal'), arg('title'))
   }, 60000)
   if (!created.sessionId) throw new Error(`host_session_create returned no sessionId on ${peer.name}: ${JSON.stringify(created)}`)

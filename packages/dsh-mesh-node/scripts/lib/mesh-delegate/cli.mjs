@@ -7,7 +7,7 @@ import { status, reply, cancel, gc, list } from './tasks.mjs'
 import { sessions, history, gcStale, overview } from './inspect.mjs'
 
 const USAGE = [
-  'usage: node scripts/mesh-delegate.mjs delegate --to company [--policy new|continue|auto] [--conversation C-...] [--session <id>] [--instance dsh0|dsh1] [--workspace <cwd>] [--title <名称>] [--dedicated] [--force] [--dry-run] --goal-file goal.txt [--wait 120] [--stall-after 300]',
+  'usage: node scripts/mesh-delegate.mjs delegate --to company [--policy new|continue|auto] [--conversation C-...] [--session <id>] [--instance dsh0|dsh1] [--workspace <cwd>] [--permission <preset>] [--title <名称>] [--dedicated] [--force] [--dry-run] --goal-file goal.txt [--wait 120] [--stall-after 300]',
   '       --title <名称> 由发起方 AI 自拟标题（自动加 "[委托] " 前缀并锁定，防止 DSH 自动重命名；不传则用 goal 首行兜底）',
   '       default policy=new → creates a fresh DSH conversation; continue reuses the conversation session; --session pins an exact live session',
   '       node scripts/mesh-delegate.mjs sessions --to company [--instance dsh0|dsh1] [--workspace <path>] [--no-ended] [--limit 50] [--only-safe]   # peer conversations + delegation safety classification',

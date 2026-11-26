@@ -231,11 +231,18 @@ export function createHostClient({ config, home, log = console, instance, peerId
      * sessionController path). Requires dsh-mesh-host >= 0.2.0; an older
      * plugin answers 404 unknown endpoint.
      */
-    async createSession({ cwd, sessionId, agentPreset, workspaceId, title } = {}) {
+    async createSession({ cwd, sessionId, agentPreset, workspaceId, title, permission } = {}) {
       return call('/host/sessions/create', {
         method: 'POST',
-        body: { cwd, sessionId, agentPreset, workspaceId, title },
+        body: { cwd, sessionId, agentPreset, workspaceId, title, permission },
         timeoutMs: 60000
+      })
+    },
+    async setSessionPermission({ sessionId, permission } = {}) {
+      return call('/host/sessions/permission', {
+        method: 'POST',
+        body: { sessionId, permission },
+        timeoutMs: 30000
       })
     },
     /**

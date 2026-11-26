@@ -259,13 +259,18 @@ export function buildDelegate(ctx) {
           .max(200)
           .optional()
           .describe(`Agent preset id the fresh session is composed from (default: ${DEFAULT_AGENT_PRESET}). Ignored for a continuation.`),
+        permission: z
+          .string()
+          .max(80)
+          .optional()
+          .describe('Session permission preset for a fresh delegated conversation (e.g. danger-full-access). Independent of agentPreset.'),
         title: z
           .string()
           .max(120)
           .optional()
           .describe('Name this delegated conversation yourself (short, human-readable). dsh-mesh adds the visual prefix "[委托] " automatically and pins the title so DSH auto-titling cannot overwrite it. If omitted, a fallback derived from the goal is used; prefer supplying one.')
       }),
-      handler: async ({ goal, scope, acceptance, conversationId, sessionId, fromSessionId, instance, workspace, force, agentPreset, title }) => {
+      handler: async ({ goal, scope, acceptance, conversationId, sessionId, fromSessionId, instance, workspace, force, agentPreset, permission, title }) => {
         try {
           const config = ctx.getConfig()
           const root = localRoot(config)
@@ -310,7 +315,7 @@ export function buildDelegate(ctx) {
             const preset = agentPreset || DEFAULT_AGENT_PRESET
             // Pin a user-owned title before the first prompt: DSH stops automatic
             // revisions once a user title exists (session-title rename semantics).
-            const createdSession = await client.createSession({ cwd, agentPreset: preset, title: delegationTitle(goal, title) })
+            const createdSession = await client.createSession({ cwd, agentPreset: preset, ...(permission ? { permission } : {}), title: delegationTitle(goal, title) })
             if (!createdSession?.sessionId) {
               throw new Error(`host bridge did not return a sessionId (plugin too old? need dsh-mesh-host >= 0.2.0): ${JSON.stringify(createdSession)}`)
             }
